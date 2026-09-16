@@ -72,7 +72,7 @@ Immich's own compose file:
 ```yaml
 services:
   immich-moments:
-    image: ghcr.io/booyaka101/immich-moments:1.0.2
+    image: ghcr.io/booyaka101/immich-moments:1.0.3
     environment:
       IMMICH_URL: http://immich-server:2283
       IMMICH_API_KEY: ${IMMICH_API_KEY}

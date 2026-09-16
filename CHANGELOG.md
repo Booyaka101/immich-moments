@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.3 - 2026-09-16
+
+### Fixed
+
+- `latest` points at the CPU image again. The GPU build carried the metadata action's
+  automatic `latest` tag, which the `-cuda` suffix does not apply to, so it overwrote the
+  plain image and a `docker pull ...:latest` fetched a CUDA build that wants a GPU. Both tag
+  sets are now explicit about it. No code change.
+
 ## 1.0.2 - 2026-09-16
 
 ### Fixed
