@@ -6,6 +6,7 @@ Every failure here must reach the terminal as a sentence, not a traceback, so th
 
 from __future__ import annotations
 
+import json
 import sys
 
 import pytest
@@ -14,6 +15,7 @@ from typer.testing import CliRunner
 from immich_moments import __version__
 from immich_moments.cli import app, main
 from immich_moments.errors import ConfigError, ImmichError, StorageError
+from immich_moments.search import Hit
 
 runner = CliRunner()
 
@@ -115,3 +117,75 @@ def test_a_full_disk_is_the_environment_talking_not_a_bug(monkeypatch: pytest.Mo
     assert "No space left on device" in captured.err
     assert "report it" not in captured.err
     assert "Traceback" not in captured.err
+
+
+class StubClient:
+    """Stands in for the Immich and ML clients, neither of which a filter test needs."""
+
+    def __enter__(self) -> StubClient:
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        return None
+
+
+def stub_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMMICH_URL", "http://immich.test")
+    monkeypatch.setenv("IMMICH_API_KEY", "key")
+    monkeypatch.setattr(
+        "immich_moments.cli._clients",
+        lambda _config: (StubClient(), StubClient(), "ViT-B-32__openai", "buffalo_l"),
+    )
+
+
+def test_searching_for_nothing_at_all_says_what_to_type(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    stub_clients(monkeypatch)
+
+    code, _ = run("search", monkeypatch=monkeypatch)
+
+    captured = capsys.readouterr()
+    assert code == ConfigError.exit_code
+    assert "--person" in captured.err
+
+
+def test_a_person_nobody_is_indexed_under_is_not_silently_empty(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A typo would otherwise be indistinguishable from a person who is in no video."""
+    stub_clients(monkeypatch)
+
+    code, _ = run("search", "--person", "Ana", monkeypatch=monkeypatch)
+
+    captured = capsys.readouterr()
+    assert code == ConfigError.exit_code
+    assert "Ana" in captured.err
+    assert "nobody yet" in captured.err
+
+
+def test_json_output_is_machine_readable(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    stub_clients(monkeypatch)
+    hit = Hit(
+        scene_id=1,
+        asset_id="a1",
+        original_file_name="birthday.mp4",
+        scene_index=2,
+        file_created_at="2026-06-01T00:00:00Z",
+        start_seconds=10.0,
+        end_seconds=20.0,
+        label="blowing out candles",
+        label_score=0.3,
+        thumb_path="a1-2.jpg",
+        visual_score=0.4,
+        text_score=0.0,
+        score=0.9,
+        people=["Anna"],
+    )
+    monkeypatch.setattr("immich_moments.cli.run_search", lambda *_a, **_k: [hit])
+
+    code, _ = run("search", "candles", "--json", monkeypatch=monkeypatch)
+
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload == [hit.as_dict("http://immich.test")]
+    assert payload[0]["timestamp"] == "00:10"
+    assert payload[0]["immich_url"] == "http://immich.test/photos/a1"

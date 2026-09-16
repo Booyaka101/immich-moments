@@ -18,7 +18,7 @@ from ..config import Config
 from ..errors import MomentsError
 from ..immich import ImmichClient
 from ..ml import MLClient
-from ..search import Hit, format_timestamp
+from ..search import Filters
 from ..search import search as run_search
 from ..store import Store
 
@@ -76,15 +76,25 @@ def create_app(
     async def stats(request: Request):
         return await _stats(request.app)
 
+    @app.get("/api/people")
+    async def people(request: Request):
+        async with request.app.state.searching:
+            rows = await run_in_threadpool(request.app.state.store.people_in_index)
+        return {"people": [{"name": row["name"], "scenes": row["scenes"]} for row in rows]}
+
     @app.get("/api/search")
     async def search(
         request: Request,
-        q: str = Query(..., min_length=1, description="What you are looking for."),
+        q: str = Query("", description="What you are looking for."),
         limit: int = Query(24, ge=1, le=MAX_LIMIT),
         weight: float | None = Query(None, ge=0.0, le=1.0),
         asset: str | None = Query(None),
+        person: list[str] = Query([], description="Only scenes this person appears in."),
     ):
         state = request.app.state
+        filters = Filters(asset_id=asset, people=tuple(name for name in person if name.strip()))
+        if not q.strip() and not filters:
+            raise HTTPException(status_code=400, detail="give me a query, or a person to browse")
         # A search is an HTTP call to the ML container and then SQLite, both blocking. On the event
         # loop it would freeze the page and every thumbnail behind one query.
         async with state.searching:
@@ -95,13 +105,14 @@ def create_app(
                 q,
                 limit=limit,
                 visual_weight=config.visual_weight if weight is None else weight,
-                asset_id=asset,
+                filters=filters,
             )
         return {
             "query": q,
+            "people": list(filters.people),
             "weight": config.visual_weight if weight is None else weight,
             "count": len(hits),
-            "hits": [_serialise(hit, config) for hit in hits],
+            "hits": [hit.as_dict(config.immich_url) for hit in hits],
         }
 
     @app.get("/thumbs/{name}")
@@ -112,27 +123,6 @@ def create_app(
         return FileResponse(path, media_type="image/jpeg")
 
     return app
-
-
-def _serialise(hit: Hit, config: Config) -> dict:
-    return {
-        "scene_id": hit.scene_id,
-        "asset_id": hit.asset_id,
-        "file_name": hit.original_file_name,
-        "scene_index": hit.scene_index,
-        "start_seconds": round(hit.start_seconds, 2),
-        "end_seconds": round(hit.end_seconds, 2),
-        "timestamp": hit.timestamp,
-        "duration": format_timestamp(hit.end_seconds - hit.start_seconds),
-        "label": hit.label,
-        "people": hit.people,
-        "transcript": hit.transcript,
-        "score": round(hit.score, 4),
-        "visual_score": round(hit.visual_score, 4),
-        "text_score": round(hit.text_score, 4),
-        "thumb": f"/thumbs/{hit.thumb_path}" if hit.thumb_path else None,
-        "immich_url": hit.immich_url(config.immich_url),
-    }
 
 
 async def _stats(app: FastAPI) -> dict:

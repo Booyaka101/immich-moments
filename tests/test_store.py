@@ -153,6 +153,34 @@ def test_replacing_scenes_swaps_faces_too(store: Store, config: Config) -> None:
     assert store.db.execute("SELECT COUNT(*) AS n FROM scene_faces").fetchone()["n"] == 1
 
 
+def test_the_people_in_the_index_are_counted_by_scene(store: Store, config: Config) -> None:
+    """The UI offers these names, so an unmatched face must not become a nameless entry."""
+    seed_asset(store)
+    vectors = VectorFile(config.vectors_path, 8)
+    store.replace_scenes(
+        "a1",
+        [
+            SceneRecord(
+                0,
+                0.0,
+                5.0,
+                vector=unit(1),
+                faces=[
+                    FaceRecord("p1", "Anna", 0.2, 0.99, (1, 2, 3, 4)),
+                    FaceRecord(None, None, None, 0.9, (5, 6, 7, 8)),
+                ],
+            ),
+            SceneRecord(
+                1, 5.0, 9.0, vector=unit(2), faces=[FaceRecord("p1", "Anna", 0.2, 0.9, (1, 2, 3, 4))]
+            ),
+        ],
+        vectors,
+        indexed_at=NOW,
+    )
+
+    assert [dict(row) for row in store.people_in_index()] == [{"name": "Anna", "scenes": 2}]
+
+
 def test_transcript_segments_land_in_the_scene_they_fall_in(store: Store, config: Config) -> None:
     seed_asset(store)
     vectors = VectorFile(config.vectors_path, 8)

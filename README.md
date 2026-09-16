@@ -35,8 +35,9 @@ http://localhost:2283/photos/d625e56a-0254-4d24-ac08-d3cf2d297931
 ```
 
 Each hit is a scene, not a file: a timestamp you can scrub to, the people in it, and the line
-that was spoken there. `serve` puts the same thing in a browser with thumbnails, and every
-result links back to the asset in Immich.
+that was spoken there. `--person Martin` narrows any search to the scenes he is in, or lists
+them newest first if you have no words to search for. `serve` puts the same thing in a browser
+with thumbnails, and every result links back to the asset in Immich.
 
 Optionally it writes what it found back into Immich, as tags and a fenced block in the asset
 description, so the moments are findable from Immich's own search bar too.
@@ -195,6 +196,83 @@ searches inside one video.
 `--weight` is the blend: 1 is vision only, 0 is speech only, the default is 0.65. Pull it down
 towards 0.3 when you want the transcript to decide.
 
+`--person` narrows a search to the scenes someone is in. It is repeatable, and two names mean
+both of them in the same scene, not either of them.
+
+```
+$ immich-moments search "a train moving through the dark" --person Martin --limit 2
+                   2 scene(s) for 'a train moving through the dark' with Martin
+┌───────┬───────┬─────────────────────┬─────────────────────┬───────────────┬─────────────────────┐
+│ score │    at │ video               │ scene               │ people        │ said                │
+├───────┼───────┼─────────────────────┼─────────────────────┼───────────────┼─────────────────────┤
+│ 0.408 │ 01:00 │ mothersday-ep11.mp4 │ a bus journey       │ Martin, Elena │ That's a good thing │
+│       │       │                     │                     │               │ to remember. What   │
+│       │       │                     │                     │               │ about you?          │
+│ 0.099 │ 00:08 │ mothersday-ep11.mp4 │ a close up of a     │ Martin        │ I got on it Selby.  │
+│       │       │                     │ face                │               │ The platform was    │
+│       │       │                     │                     │               │ empty.              │
+└───────┴───────┴─────────────────────┴─────────────────────┴───────────────┴─────────────────────┘
+http://localhost:2283/photos/d625e56a-0254-4d24-ac08-d3cf2d297931
+```
+
+Scores are always relative to the scenes that were searched, so a filtered search rescales
+against what the filter left rather than against the whole library.
+
+With `--person` and no query at all there is nothing to rank, so you get that person's scenes
+newest video first, and the column that usually holds the score holds the date instead.
+
+```
+$ immich-moments search --person Martin --limit 3
+                                      3 scene(s) with Martin
+┌────────────┬───────┬─────────────────────┬──────────────────────┬────────┬──────────────────────┐
+│       date │    at │ video               │ scene                │ people │ said                 │
+├────────────┼───────┼─────────────────────┼──────────────────────┼────────┼──────────────────────┤
+│ 2026-06-07 │ 00:05 │ mothersday-ep11.mp4 │ a close up of a face │ Martin │ I got on it Selby.   │
+│            │       │                     │                      │        │ The platform was     │
+│            │       │                     │                      │        │ empty.               │
+│ 2026-06-07 │ 00:12 │ mothersday-ep11.mp4 │ -                    │ Martin │ My mother put me on  │
+│            │       │                     │                      │        │ it. She kept saying, │
+│            │       │                     │                      │        │ just k…              │
+│ 2026-06-07 │ 00:19 │ mothersday-ep11.mp4 │ a close up of a face │ Martin │ Then it'll be the    │
+│            │       │                     │                      │        │ first to see what's  │
+│            │       │                     │                      │        │ after it.            │
+└────────────┴───────┴─────────────────────┴──────────────────────┴────────┴──────────────────────┘
+http://localhost:2283/photos/d625e56a-0254-4d24-ac08-d3cf2d297931
+```
+
+A name that no indexed scene carries is an error naming the people that are indexed, because
+a typo otherwise looks exactly like a person who happens to be in no video.
+
+`--json` prints the same hits as the web API does, for piping into something else. `thumb` is
+the path `serve` exposes; the file itself is that name under `$DATA_DIR/thumbs`.
+
+```
+$ immich-moments search "where did you get that tape" --limit 1 --json
+[
+  {
+    "scene_id": 67,
+    "asset_id": "dc58afad-2843-4202-91bb-8b0ac95c72c4",
+    "file_name": "mothersday-ep14.mp4",
+    "file_created_at": "2026-06-10T12:00:00.000Z",
+    "scene_index": 15,
+    "start_seconds": 86.29,
+    "end_seconds": 91.33,
+    "timestamp": "01:26",
+    "duration": "00:05",
+    "label": "a meeting around a table",
+    "people": [
+      "Nadia"
+    ],
+    "transcript": "Where did you get that tape, Eva? is not a public recording. He gave it to me before he died he said you would",
+    "score": 0.35,
+    "visual_score": 0.2034,
+    "text_score": 22.7209,
+    "thumb": "/thumbs/dc58afad-2843-4202-91bb-8b0ac95c72c4-0015.jpg",
+    "immich_url": "http://localhost:2283/photos/dc58afad-2843-4202-91bb-8b0ac95c72c4"
+  }
+]
+```
+
 ### serve
 
 ```
@@ -203,7 +281,9 @@ immich-moments on http://127.0.0.1:8099
 ```
 
 One page, one search box, a slider for the blend, thumbnails, and a link into Immich for every
-scene.
+scene. The `who` menu lists the people the index knows and how many scenes each is in, and the
+name under any result filters on that person when you click it. The query and the filters live
+in the URL, so a search is a link you can keep.
 
 ### write it back into Immich
 

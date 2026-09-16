@@ -14,7 +14,7 @@ import pytest
 
 from immich_moments.config import Config
 from immich_moments.ml import MLClient
-from immich_moments.search import format_timestamp, fts_query, search
+from immich_moments.search import Filters, browse, format_timestamp, fts_query, search
 from immich_moments.store import FaceRecord, SceneRecord, Store, TranscriptRecord, VectorFile
 
 from conftest import unit
@@ -133,7 +133,7 @@ def test_the_blend_prefers_a_scene_that_wins_on_both(seeded: Store, config: Conf
 def test_a_search_can_be_pinned_to_one_asset(seeded: Store, config: Config) -> None:
     with ml_returning(config, GARDEN) as ml:
         everywhere = search(seeded, ml, "a garden", visual_weight=1.0)
-        pinned = search(seeded, ml, "a garden", visual_weight=1.0, asset_id="birthday")
+        pinned = search(seeded, ml, "a garden", visual_weight=1.0, filters=Filters(asset_id="birthday"))
 
     assert everywhere[0].asset_id == "garden"
     assert {hit.asset_id for hit in pinned} == {"birthday"}
@@ -289,3 +289,71 @@ def test_every_transcript_match_keeps_a_score_above_zero(seeded: Store, config: 
     speech = [hit for hit in hits if hit.text_score != 0.0]
     assert len(speech) == 2
     assert all(hit.score > 0.0 for hit in speech)
+
+
+def test_a_person_filter_keeps_only_the_scenes_they_are_in(seeded: Store, config: Config) -> None:
+    """Anna is in scene 1 of the birthday and nowhere else, so nothing else can rank."""
+    anna = Filters(people=("Anna",))
+    with ml_returning(config, GARDEN) as ml:
+        hits = search(seeded, ml, "a garden", visual_weight=1.0, filters=anna)
+
+    assert [(hit.asset_id, hit.scene_index) for hit in hits] == [("birthday", 1)]
+    assert hits[0].people == ["Anna", "Tom"]
+
+
+def test_a_person_filter_reaches_the_speech_channel_too(seeded: Store, config: Config) -> None:
+    """ "who wants a slice" is said in scene 2, which Anna is not in."""
+
+    def refuse(_request: httpx.Request) -> httpx.Response:  # pragma: no cover - must not run
+        raise AssertionError("a text-only search must not embed the query")
+
+    with MLClient(config, "c", "f", transport=httpx.MockTransport(refuse)) as ml:
+        unfiltered = search(seeded, ml, "who wants a slice", visual_weight=0.0)
+        filtered = search(
+            seeded, ml, "who wants a slice", visual_weight=0.0, filters=Filters(people=("Anna",))
+        )
+
+    assert unfiltered[0].scene_index == 2
+    assert filtered == []
+
+
+def test_a_person_matches_whatever_case_you_type(seeded: Store, config: Config) -> None:
+    with ml_returning(config, CANDLES) as ml:
+        hits = search(seeded, ml, "candles", visual_weight=1.0, filters=Filters(people=("  aNNa ",)))
+
+    assert [hit.scene_index for hit in hits] == [1]
+
+
+def test_a_filter_with_no_query_browses_without_asking_the_model(seeded: Store, config: Config) -> None:
+    def refuse(_request: httpx.Request) -> httpx.Response:  # pragma: no cover - must not run
+        raise AssertionError("browsing must not embed anything")
+
+    with MLClient(config, "c", "f", transport=httpx.MockTransport(refuse)) as ml:
+        hits = search(seeded, ml, "   ", filters=Filters(people=("Tom",)))
+
+    assert [(hit.asset_id, hit.scene_index) for hit in hits] == [("birthday", 1)]
+    assert hits[0].score == 0.0
+    assert hits[0].transcript == "happy birthday to you"
+
+
+def test_browsing_puts_the_newest_video_first(seeded: Store) -> None:
+    """The garden is a month older than the birthday, and scenes stay in playing order."""
+    hits = browse(seeded, Filters())
+
+    assert [(hit.asset_id, hit.scene_index) for hit in hits] == [
+        ("birthday", 0),
+        ("birthday", 1),
+        ("birthday", 2),
+        ("garden", 0),
+    ]
+    assert hits[0].file_created_at == "2026-06-01T00:00:00Z"
+
+
+def test_browsing_honours_the_limit(seeded: Store) -> None:
+    assert len(browse(seeded, Filters(), limit=2)) == 2
+
+
+def test_two_people_means_both_of_them_in_the_same_scene(seeded: Store) -> None:
+    """Anna and Tom share scene 1; nobody shares a scene with a name that is not there."""
+    assert [hit.scene_index for hit in browse(seeded, Filters(people=("Anna", "Tom")))] == [1]
+    assert browse(seeded, Filters(people=("Anna", "Ruth"))) == []

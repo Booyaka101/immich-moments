@@ -20,6 +20,32 @@ CANDIDATES = 400
 VISUAL_DECISIVE_MARGIN = 0.10
 
 
+@dataclass(frozen=True, slots=True)
+class Filters:
+    """Narrows the candidate scenes before either channel scores them."""
+
+    asset_id: str | None = None
+    people: tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.asset_id or self.people)
+
+    def sql(self, asset_column: str, scene_column: str) -> tuple[str, list]:
+        """Extra AND clauses for a query that can reach both columns, and their parameters."""
+        clauses: list[str] = []
+        params: list = []
+        if self.asset_id:
+            clauses.append(f"{asset_column} = ?")
+            params.append(self.asset_id)
+        # One clause each, so two names mean both people in the same scene rather than either.
+        for name in self.people:
+            clauses.append(
+                f"{scene_column} IN (SELECT scene_id FROM scene_faces WHERE lower(person_name) = ?)"  # noqa: S608
+            )
+            params.append(name.strip().lower())
+        return "".join(f" AND {clause}" for clause in clauses), params
+
+
 @dataclass(slots=True)
 class TextMatch:
     """The best-scoring transcript segment in one scene, and where it was said."""
@@ -35,6 +61,7 @@ class Hit:
     asset_id: str
     original_file_name: str
     scene_index: int
+    file_created_at: str | None
     start_seconds: float
     end_seconds: float
     label: str | None
@@ -59,6 +86,28 @@ class Hit:
     def immich_url(self, base: str) -> str:
         return f"{base.rstrip('/')}/photos/{self.asset_id}"
 
+    def as_dict(self, immich_url: str) -> dict:
+        """One JSON shape for the web API and `search --json`, so they cannot drift apart."""
+        return {
+            "scene_id": self.scene_id,
+            "asset_id": self.asset_id,
+            "file_name": self.original_file_name,
+            "file_created_at": self.file_created_at,
+            "scene_index": self.scene_index,
+            "start_seconds": round(self.start_seconds, 2),
+            "end_seconds": round(self.end_seconds, 2),
+            "timestamp": self.timestamp,
+            "duration": format_timestamp(self.end_seconds - self.start_seconds),
+            "label": self.label,
+            "people": self.people,
+            "transcript": self.transcript,
+            "score": round(self.score, 4),
+            "visual_score": round(self.visual_score, 4),
+            "text_score": round(self.text_score, 4),
+            "thumb": f"/thumbs/{self.thumb_path}" if self.thumb_path else None,
+            "immich_url": self.immich_url(immich_url),
+        }
+
 
 def format_timestamp(seconds: float) -> str:
     total = int(max(seconds, 0.0))
@@ -80,14 +129,14 @@ def search(
     *,
     limit: int = 20,
     visual_weight: float = 0.65,
-    asset_id: str | None = None,
+    filters: Filters = Filters(),
 ) -> list[Hit]:
     query = query.strip()
     if not query:
-        return []
+        return browse(store, filters, limit=limit) if filters else []
 
-    visual = _visual_scores(store, ml, query, asset_id) if visual_weight > 0 else {}
-    textual = _text_scores(store, query, asset_id) if visual_weight < 1 else {}
+    visual = _visual_scores(store, ml, query, filters) if visual_weight > 0 else {}
+    textual = _text_scores(store, query, filters) if visual_weight < 1 else {}
     if not visual and not textual:
         return []
 
@@ -104,7 +153,22 @@ def search(
     return _hydrate(store, ranked, visual, textual)
 
 
-def _visual_scores(store: Store, ml: MLClient, query: str, asset_id: str | None) -> dict[int, float]:
+def browse(store: Store, filters: Filters, *, limit: int = 20) -> list[Hit]:
+    """Every scene the filters allow, newest video first. No query, so nothing is scored."""
+    where, params = filters.sql("s.asset_id", "s.id")
+    rows = store.db.execute(
+        f"""
+        SELECT s.id FROM scenes s JOIN assets a ON a.id = s.asset_id
+        WHERE 1=1{where}
+        ORDER BY a.file_created_at DESC, s.asset_id, s.idx
+        LIMIT ?
+        """,  # noqa: S608
+        (*params, limit),
+    ).fetchall()
+    return _hydrate(store, [(int(row["id"]), 0.0) for row in rows], {}, {})
+
+
+def _visual_scores(store: Store, ml: MLClient, query: str, filters: Filters) -> dict[int, float]:
     dim_state = store.get_state("vector_dim")
     if dim_state is None:
         return {}
@@ -112,12 +176,11 @@ def _visual_scores(store: Store, ml: MLClient, query: str, asset_id: str | None)
     if vectors.size == 0:
         return {}
 
-    sql = "SELECT id, vector_row FROM scenes WHERE vector_row IS NOT NULL"
-    params: tuple = ()
-    if asset_id:
-        sql += " AND asset_id = ?"
-        params = (asset_id,)
-    rows = store.db.execute(sql, params).fetchall()
+    where, params = filters.sql("asset_id", "id")
+    rows = store.db.execute(
+        f"SELECT id, vector_row FROM scenes WHERE vector_row IS NOT NULL{where}",  # noqa: S608
+        params,
+    ).fetchall()
     usable = [(r["id"], r["vector_row"]) for r in rows if r["vector_row"] < vectors.shape[0]]
     if not usable:
         return {}
@@ -129,25 +192,21 @@ def _visual_scores(store: Store, ml: MLClient, query: str, asset_id: str | None)
     return {int(scene_ids[i]): float(scores[i]) for i in top}
 
 
-def _text_scores(store: Store, query: str, asset_id: str | None) -> dict[int, TextMatch]:
+def _text_scores(store: Store, query: str, filters: Filters) -> dict[int, TextMatch]:
     match = fts_query(query)
     if not match:
         return {}
-    sql = """
+    where, filter_params = filters.sql("s.asset_id", "s.scene_id")
+    sql = f"""
         SELECT s.scene_id AS scene_id, s.start_seconds AS start_seconds, s.text AS text,
                -bm25(transcript_fts) AS score
         FROM transcript_fts
         JOIN transcript_segments s ON s.id = transcript_fts.rowid
-        WHERE transcript_fts MATCH ? AND s.scene_id IS NOT NULL
-    """
-    params: list = [match]
-    if asset_id:
-        sql += " AND s.asset_id = ?"
-        params.append(asset_id)
-    sql += " ORDER BY score DESC LIMIT ?"
-    params.append(CANDIDATES)
+        WHERE transcript_fts MATCH ? AND s.scene_id IS NOT NULL{where}
+        ORDER BY score DESC LIMIT ?
+    """  # noqa: S608
     try:
-        rows = store.db.execute(sql, params).fetchall()
+        rows = store.db.execute(sql, (match, *filter_params, CANDIDATES)).fetchall()
     except sqlite3.OperationalError:
         return {}
 
@@ -208,7 +267,7 @@ def _hydrate(
         row["id"]: row
         for row in store.db.execute(
             f"""
-            SELECT s.*, a.original_file_name
+            SELECT s.*, a.original_file_name, a.file_created_at
             FROM scenes s JOIN assets a ON a.id = s.asset_id
             WHERE s.id IN ({placeholders})
             """,  # noqa: S608
@@ -229,6 +288,7 @@ def _hydrate(
                 asset_id=row["asset_id"],
                 original_file_name=row["original_file_name"],
                 scene_index=row["idx"],
+                file_created_at=row["file_created_at"],
                 start_seconds=row["start_seconds"],
                 end_seconds=row["end_seconds"],
                 label=row["label"],

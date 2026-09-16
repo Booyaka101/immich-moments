@@ -18,6 +18,11 @@
     <input id="weight" type="range" min="0" max="1" step="0.05" value="{{ stats.visual_weight }}">
     <label for="weight">vision</label>
     <span id="weight-value">{{ stats.visual_weight }}</span>
+    <label for="people">who</label>
+    <select id="people">
+      <option value="">anyone</option>
+    </select>
+    <div id="filters" class="chips"></div>
   </div>
   <p class="stats">
     {{ stats.scenes }} scenes across {{ stats.assets }} videos,
@@ -27,7 +32,7 @@
 </header>
 
 <main>
-  <p id="hint" class="note">Type what you remember. Scene vectors and the transcript are searched together.</p>
+  <p id="hint" class="note">Type what you remember, or pick who is in it. Scene vectors and the transcript are searched together.</p>
   <div id="results"></div>
 </main>
 

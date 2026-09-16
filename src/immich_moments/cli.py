@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import sys
 from pathlib import Path
@@ -15,11 +16,12 @@ from rich.table import Table
 
 from . import __version__
 from .config import Config, load_config
-from .errors import MomentsError, StorageError
+from .errors import ConfigError, MomentsError, StorageError
 from .faces import pad_thumbnail
 from .immich import ImmichClient
 from .indexer import run_index
 from .ml import MLClient
+from .search import Filters
 from .search import search as run_search
 from .store import Store
 from .writeback import write_back as apply_write_back
@@ -218,35 +220,53 @@ def index(
 
 @app.command()
 def search(
-    query: Annotated[str, typer.Argument(help="What you are looking for.")],
+    query: Annotated[str, typer.Argument(help="What you are looking for.")] = "",
     limit: Annotated[int, typer.Option("--limit", "-n", help="How many scenes to show.")] = 10,
     weight: Annotated[
         float | None,
         typer.Option("--weight", "-w", help="Visual weight, 0 = speech only, 1 = vision only."),
     ] = None,
     asset: Annotated[str | None, typer.Option("--asset", help="Restrict to one asset id.")] = None,
+    person: Annotated[
+        list[str] | None,
+        typer.Option("--person", "-p", help="Only scenes this person appears in. Repeatable."),
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Print the hits as JSON.")] = False,
     config_path: ConfigOption = None,
     verbose: VerboseOption = False,
 ) -> None:
-    """Search the index and print the matching scenes with timestamps."""
+    """Search the index and print the matching scenes with timestamps.
+
+    With --person or --asset and no query, it lists those scenes newest video first.
+    """
     config = _setup(config_path, verbose)
+    people = [name.strip() for name in (person or []) if name.strip()]
+    filters = Filters(asset_id=asset, people=tuple(people))
+    if not query.strip() and not filters:
+        raise ConfigError("give me something to search for, or --person NAME to browse.")
+
     immich, ml, clip_model, _face = _clients(config)
     with immich, ml, Store(config) as store:
         store.assert_model(clip_model)
+        _known_people(store, people)
         hits = run_search(
             store,
             ml,
             query,
             limit=limit,
             visual_weight=config.visual_weight if weight is None else weight,
-            asset_id=asset,
+            filters=filters,
         )
+    if as_json:
+        console.print_json(json.dumps([hit.as_dict(config.immich_url) for hit in hits]))
+        raise typer.Exit(0 if hits else 1)
     if not hits:
         console.print("[yellow]No scenes matched.[/] Index some videos first, or try fewer words.")
         raise typer.Exit(1)
 
-    table = Table(title=f"{len(hits)} scene(s) for {query!r}", header_style="bold")
-    table.add_column("score", justify="right")
+    table = Table(title=f"{len(hits)} scene(s) {_describe(query, people)}", header_style="bold")
+    # Nothing is scored when there is no query, so the column shows the date that ordered them.
+    table.add_column("date" if not query.strip() else "score", justify="right")
     table.add_column("at", justify="right")
     # The filename is how you find the video again, so it keeps its width and "said" gives way.
     table.add_column("video", min_width=18, overflow="fold")
@@ -255,7 +275,7 @@ def search(
     table.add_column("said", max_width=30)
     for hit in hits:
         table.add_row(
-            f"{hit.score:.3f}",
+            (hit.file_created_at or "")[:10] if not query.strip() else f"{hit.score:.3f}",
             hit.timestamp,
             escape(hit.original_file_name),
             escape(hit.label or "-"),
@@ -264,6 +284,26 @@ def search(
         )
     console.print(table)
     console.print(f"[dim]{hits[0].immich_url(config.immich_url)}[/]")
+
+
+def _describe(query: str, people: list[str]) -> str:
+    """The table title: what was asked for, in the order the filters were applied."""
+    parts = []
+    if query.strip():
+        parts.append(f"for {query.strip()!r}")
+    if people:
+        parts.append("with " + " and ".join(people))
+    return " ".join(parts)
+
+
+def _known_people(store: Store, wanted: list[str]) -> None:
+    """A misspelled name would otherwise look like a person who is simply not in any video."""
+    known = {row["name"].lower(): row["name"] for row in store.people_in_index()}
+    missing = [name for name in wanted if name.lower() not in known]
+    if not missing:
+        return
+    have = ", ".join(sorted(known.values())) or "nobody yet"
+    raise ConfigError(f"no indexed scenes name {', '.join(missing)}. Indexed people: {have}")
 
 
 @app.command()

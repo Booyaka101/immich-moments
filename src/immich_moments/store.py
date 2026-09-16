@@ -413,6 +413,14 @@ class Store:
             grouped.setdefault(row["scene_id"], []).append(row)
         return grouped
 
+    def people_in_index(self) -> list[sqlite3.Row]:
+        """Named people who actually appear in a scene, with how many scenes each is in."""
+        return self.db.execute(
+            "SELECT person_name AS name, COUNT(DISTINCT scene_id) AS scenes FROM scene_faces "
+            "WHERE person_name IS NOT NULL AND person_name <> '' "
+            "GROUP BY person_name ORDER BY scenes DESC, person_name"
+        ).fetchall()
+
     # ---- transcripts -----------------------------------------------------
 
     def replace_transcript(

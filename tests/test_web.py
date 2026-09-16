@@ -144,10 +144,39 @@ def test_search_can_be_pinned_to_one_asset(client: TestClient) -> None:
 
 
 def test_a_bad_query_is_a_422_not_a_traceback(client: TestClient) -> None:
-    assert client.get("/api/search", params={"q": ""}).status_code == 422
     assert client.get("/api/search", params={"q": "x", "limit": 0}).status_code == 422
     assert client.get("/api/search", params={"q": "x", "limit": 1000}).status_code == 422
     assert client.get("/api/search", params={"q": "x", "weight": 2}).status_code == 422
+
+
+def test_an_empty_search_says_what_is_missing(client: TestClient) -> None:
+    response = client.get("/api/search", params={"q": ""})
+    assert response.status_code == 400
+    assert "person" in response.json()["detail"]
+
+
+def test_a_person_filter_narrows_the_hits(client: TestClient) -> None:
+    body = client.get("/api/search", params={"q": "candles", "person": "Anna"}).json()
+    assert body["people"] == ["Anna"]
+    assert [hit["scene_index"] for hit in body["hits"]] == [1]
+
+    nobody = client.get("/api/search", params={"q": "candles", "person": "Nobody"}).json()
+    assert nobody["count"] == 0
+
+
+def test_a_person_with_no_query_browses_that_person(client: TestClient) -> None:
+    body = client.get("/api/search", params={"person": "Tom"}).json()
+    assert body["count"] == 1
+    assert body["hits"][0]["scene_index"] == 1
+    assert body["hits"][0]["file_created_at"] == "2026-06-01T00:00:00Z"
+
+
+def test_the_people_endpoint_lists_who_the_index_knows(client: TestClient) -> None:
+    body = client.get("/api/people").json()
+    assert body["people"] == [
+        {"name": "Anna", "scenes": 1},
+        {"name": "Tom", "scenes": 1},
+    ]
 
 
 def test_thumbnails_are_served_from_the_data_directory(client: TestClient) -> None:

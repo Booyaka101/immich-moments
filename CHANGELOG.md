@@ -16,8 +16,14 @@ First release.
 - `search`: cosine over scene vectors blended with FTS5 BM25 over the transcript, with a
   configurable weight (default 0.65 visual, 0.35 text). Speech hits report the second the
   words were said, not the start of the scene.
+- `search --person NAME`: narrows either channel to the scenes that person is in. Repeatable,
+  and two names mean both of them in one scene. With no query it lists their scenes newest
+  video first, and prints the date where the score would go. `--json` prints the same shape
+  the web API returns.
 - `serve`: a single page on port 8099 with thumbnails, people chips, transcript quotes, a
-  blend slider, and a link into Immich for every scene.
+  blend slider, a menu of the people in the index, and a link into Immich for every scene.
+  Clicking a name on a result filters on that person, and the query and filters live in the
+  URL.
 - `doctor`: verifies the API key, reports the CLIP and face model names the server is actually
   configured with, and round-trips a real image from the library through `/predict`.
 - `index --write-back`: tags under `moments/people/` and `moments/scene/`, plus one fenced
@@ -35,6 +41,8 @@ First release.
   divided by 0.10. CLIP is trained at a logit scale of 100, so 0.10 of cosine is ten logits and
   counts as certain. Standard scores were tried first and are wrong for this: dividing by the
   per-query spread removes the very signal that says whether CLIP found anything.
+- Scores are relative to the scenes that were searched, so a filtered search rescales against
+  what the filter left rather than against the whole library.
 - The CLIP model name is read from `/api/system-config`; nothing is hardcoded. A model change
   that changes the vector dimension is detected and refuses to mix vector spaces, asking for
   `--reindex`.
