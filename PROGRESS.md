@@ -1,6 +1,6 @@
 # PROGRESS
 
-Status: v1.0.0 complete and verified locally. Nothing has been published.
+Status: v1.0.1 published. PyPI, GHCR and the GitHub repository are live.
 
 ## What exists
 
@@ -202,20 +202,22 @@ Every surface a user actually sees, gone over once with the current platform rat
 
 ## Distribution
 
-Nothing is published and nothing will be published from here. The owner ships it.
+Published on the owner's instruction: `github.com/Booyaka101/immich-moments`,
+`pypi.org/project/immich-moments`, and `ghcr.io/booyaka101/immich-moments` on the v1.0.1 tag.
 
-Single best first step: the Immich discussion that asks for exactly this,
-`immich-app/immich` discussion 5936, 62 upvotes and still open. A reply there with the compose
-snippet and one screenshot lands in front of the people who already know they want it, which
-beats a cold post to r/selfhosted on launch day.
+1.0.0 and 1.0.1 were uploaded to PyPI with the account token, because trusted publishing needs
+a pending publisher registered on pypi.org and that is a logged-in browser step. Registering it
+against this repository, workflow `release.yml`, environment `pypi`, makes every later tag
+publish itself from CI.
 
-Order after that: PyPI release (the release workflow is written and uses trusted publishing,
-so the only manual step is creating the PyPI project and the GitHub environment), GHCR image
-on the same tag, then r/selfhosted once there is a link to point at.
+Announcing is still to do, and the single best first step is the Immich discussion that asks
+for exactly this: `immich-app/immich` discussion 5936, 62 upvotes and still open. A reply there
+with the compose snippet and one screenshot lands in front of the people who already know they
+want it, which beats a cold post to r/selfhosted. r/selfhosted after that.
 
 ## Repository state
 
-- Version 1.0.0 everywhere: `pyproject.toml`, `CHANGELOG.md`, the compose example.
+- Version 1.0.1 everywhere: `pyproject.toml`, `CHANGELOG.md`, the compose example.
 - `ruff check` and `ruff format --check` clean.
 - CI workflow covers 3.12 and 3.13 on Ubuntu and Windows, lint, packaging, and a Docker build.
 - Release workflow is tag-triggered, re-verifies, and refuses a tag that disagrees with

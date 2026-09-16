@@ -6,6 +6,7 @@ Every failure here must reach the terminal as a sentence, not a traceback, so th
 
 from __future__ import annotations
 
+import errno
 import json
 import sys
 
@@ -429,3 +430,18 @@ def test_a_terminal_index_gets_a_bar_per_phase(monkeypatch: pytest.MonkeyPatch, 
     out = capsys.readouterr().out
     assert "visual" in out and "speech" in out
     assert "/2" in out
+
+
+class _DeadPipe:
+    def flush(self) -> None:
+        raise OSError(errno.EINVAL, "Invalid argument")
+
+
+def test_a_reader_that_hung_up_is_not_a_disk_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`immich-moments --help | head` must not claim the disk is full."""
+    assert cli_module._reader_hung_up(BrokenPipeError())
+    assert not cli_module._reader_hung_up(OSError(errno.ENOSPC, "No space left on device"))
+    # EINVAL is what Windows raises for a write to a closed pipe, and for plenty else besides.
+    assert not cli_module._reader_hung_up(OSError(errno.EINVAL, "Invalid argument"))
+    monkeypatch.setattr(sys, "stdout", _DeadPipe())
+    assert cli_module._reader_hung_up(OSError(errno.EINVAL, "Invalid argument"))

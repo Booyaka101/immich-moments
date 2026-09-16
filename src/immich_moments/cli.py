@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -643,6 +645,23 @@ def _print_writeback(result) -> None:
         )
 
 
+def _reader_hung_up(exc: OSError) -> bool:
+    """Whether the thing reading stdout is gone, as `| head` leaves it.
+
+    Windows raises EINVAL for a write to a closed pipe rather than EPIPE, and EINVAL on its own
+    could be anything, so the pipe is probed before a real error gets swallowed as one.
+    """
+    if isinstance(exc, BrokenPipeError):
+        return True
+    if exc.errno != errno.EINVAL:
+        return False
+    try:
+        sys.stdout.flush()
+    except OSError:
+        return True
+    return False
+
+
 def main() -> None:
     try:
         app()
@@ -653,6 +672,11 @@ def main() -> None:
         err.print("[yellow]interrupted.[/] Progress is checkpointed; re-run to continue.")
         raise SystemExit(130) from None
     except OSError as exc:
+        if _reader_hung_up(exc):
+            # Python flushes stdout again on the way out, and that write cannot be caught here.
+            with contextlib.suppress(OSError):
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            raise SystemExit(0) from None
         # A full disk or a read-only data dir is the environment talking, not a bug to report.
         err.print(f"[red]error:[/] {exc}")
         err.print("[dim]Progress is checkpointed; fix the disk and re-run to continue.[/]")
