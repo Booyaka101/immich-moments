@@ -12,6 +12,7 @@ import httpx
 import numpy as np
 import pytest
 
+from immich_moments import search as search_module
 from immich_moments.config import Config
 from immich_moments.errors import ConfigError
 from immich_moments.ml import MLClient
@@ -471,3 +472,18 @@ def test_a_backwards_range_says_so() -> None:
 def test_an_empty_range_is_no_filter_at_all() -> None:
     assert date_range(None, "  ") == (None, None)
     assert not Filters()
+
+
+def test_the_candidate_cut_narrows_what_is_scored_not_how_it_scores(
+    seeded: Store, config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Averaging the survivors instead of the library drains the visual channel as it grows."""
+    with ml_returning(config, CANDLES) as ml:
+        scored, library_mean = search_module._visual_scores(seeded, ml, "candles", Filters())
+        monkeypatch.setattr(search_module, "CANDIDATES", 2)
+        cut, cut_mean = search_module._visual_scores(seeded, ml, "candles", Filters())
+
+    assert len(scored) == 4
+    assert len(cut) == 2
+    assert cut_mean == pytest.approx(library_mean)
+    assert all(cut[scene_id] == pytest.approx(scored[scene_id]) for scene_id in cut)

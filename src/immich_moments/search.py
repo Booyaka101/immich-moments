@@ -179,12 +179,12 @@ def search(
     if not query:
         return browse(store, filters, limit=limit) if filters else []
 
-    visual = _visual_scores(store, ml, query, filters) if visual_weight > 0 else {}
+    visual, library_mean = _visual_scores(store, ml, query, filters) if visual_weight > 0 else ({}, 0.0)
     textual = _text_scores(store, query, filters) if visual_weight < 1 else {}
     if not visual and not textual:
         return []
 
-    visual_norm = _normalise_visual(visual)
+    visual_norm = _normalise_visual(visual, library_mean)
     text_norm = _normalise_text({key: match.score for key, match in textual.items()})
     blended = {
         scene_id: visual_weight * visual_norm.get(scene_id, 0.0)
@@ -260,13 +260,22 @@ def similar(
     return reference, _hydrate(store, ranked, dict(ranked), {})
 
 
-def _visual_scores(store: Store, ml: MLClient, query: str, filters: Filters) -> dict[int, float]:
+def _visual_scores(
+    store: Store, ml: MLClient, query: str, filters: Filters
+) -> tuple[dict[int, float], float]:
+    """The best `CANDIDATES` scenes for this query, and the mean cosine over all of them.
+
+    The mean has to come from every scene the filters allow. Taking it from the survivors of
+    the cut instead makes it climb with the library size, which quietly drains the visual
+    channel: on a library of 10,000 scenes the top 400 average far above the whole, so a scene
+    CLIP is certain about normalises as if it were ordinary.
+    """
     scene_ids, matrix = _candidates(store, filters)
     if scene_ids.size == 0:
-        return {}
+        return {}, 0.0
     scores = matrix @ ml.embed_text(query)
     top = np.argsort(-scores)[:CANDIDATES]
-    return {int(scene_ids[i]): float(scores[i]) for i in top}
+    return {int(scene_ids[i]): float(scores[i]) for i in top}, float(scores.mean())
 
 
 def _text_scores(store: Store, query: str, filters: Filters) -> dict[int, TextMatch]:
@@ -296,7 +305,7 @@ def _text_scores(store: Store, query: str, filters: Filters) -> dict[int, TextMa
     return best
 
 
-def _normalise_visual(scores: dict[int, float]) -> dict[int, float]:
+def _normalise_visual(scores: dict[int, float], library_mean: float) -> dict[int, float]:
     """Cosines onto [0, 1] by their margin over the library average for this query.
 
     The margin has to stay in cosine units. Dividing by the spread instead, which is what
@@ -308,10 +317,8 @@ def _normalise_visual(scores: dict[int, float]) -> dict[int, float]:
     """
     if not scores:
         return {}
-    values = np.fromiter(scores.values(), dtype=np.float64, count=len(scores))
-    mean = float(values.mean())
     return {
-        key: float(np.clip((value - mean) / VISUAL_DECISIVE_MARGIN, 0.0, 1.0))
+        key: float(np.clip((value - library_mean) / VISUAL_DECISIVE_MARGIN, 0.0, 1.0))
         for key, value in scores.items()
     }
 

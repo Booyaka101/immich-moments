@@ -63,6 +63,9 @@ First release.
   per-query spread removes the very signal that says whether CLIP found anything.
 - Scores are relative to the scenes that were searched, so a filtered search rescales against
   what the filter left rather than against the whole library.
+- The visual channel normalises against every scene the filters allow, not against the best
+  few hundred that get scored. Averaging the survivors instead made the baseline climb with
+  the library, which drained the visual side of the blend as the index grew.
 - The CLIP model name is read from `/api/system-config`; nothing is hardcoded. A model change
   that changes the vector dimension is detected and refuses to mix vector spaces, asking for
   `--reindex`.
