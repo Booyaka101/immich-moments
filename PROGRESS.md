@@ -45,6 +45,41 @@ footage, 8 named people.
 Test suite: 283 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
+## Measured at scale
+
+The live verification above is 16 videos. `tools/scale_bench.py` builds a synthetic index
+through the real `Store` write path and times real searches against it, so the schema, the FTS
+index and the vector file are what a real run would produce. Only the query embedding is
+stubbed, because that is Immich's work and a network call would hide ours behind it. Run on
+this box, 512-dim vectors, 14 scenes per video.
+
+| scenes | videos | blended | 9% date filter | text only | more like this | vectors | peak RSS |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 5,000 | 357 | 9.8 ms | 5.4 ms | 1.2 ms | 10.6 ms | 9.8 MB | 78 MB |
+| 25,000 | 1,785 | 71 ms | 38 ms | 4.3 ms | 81 ms | 48.8 MB | 202 MB |
+| 100,000 | 7,142 | 290 ms | 151 ms | 19 ms | 350 ms | 195 MB | 662 MB |
+| 250,000 | 17,857 | 726 ms | 380 ms | 46 ms | 892 ms | 488 MB | 1,581 MB |
+
+Latency is linear in scene count, about 2.9 ms per thousand scenes, and search stays usable
+well past any plausible home library. The text channel is cheap throughout, 46 ms at 250,000
+scenes, so FTS5 is not the constraint. The visual channel is all of it.
+
+Two things are worth fixing, neither done yet.
+
+Peak RSS settles at about 3.2x the vector file. `_candidates` calls `VectorFile.read_all`,
+which is a `np.fromfile` of the whole matrix, and then fancy-indexes it into a second array
+even when the selection is every row in id order. That is two full copies per query. The
+working set drops straight back afterwards, so it is transient rather than a leak, but a
+container with a memory cap sees the peak, not the average.
+
+Narrowing the search barely helps. A date range that keeps 9% of the library still costs
+about half a full query at every size, because the read happens before the filter is applied
+and so pays for the whole file either way. The filter only saves the matmul.
+
+Memory-mapping the vector file would fix both: the read becomes reclaimable page cache rather
+than anonymous memory, and a narrow filter would touch only the pages it needs. Skipping the
+fancy index when the filters select everything removes the second copy on the common path.
+
 ## Known limits, written down rather than hidden
 
 - The blend has no relevance judgements behind it. The visual channel is a cosine margin over
