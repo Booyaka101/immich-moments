@@ -108,3 +108,64 @@ jobs:
           tags: ${{ steps.meta-cuda.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Every release so far has been a packaging bug that the whole test suite passed. These two
+  # jobs pull what actually reached the registries and check it is what the README tells
+  # people to install.
+  published-image:
+    needs: ghcr
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: The tags people are told to pull are the CPU build, and it runs
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          id() { docker image inspect --format '{{.Id}}' "$1"; }
+
+          for tag in "$version" latest "$version-cuda"; do
+            docker pull -q "$image:$tag"
+          done
+
+          if [ "$(id "$image:$version")" != "$(id "$image:latest")" ]; then
+            echo "latest is not $version" >&2; exit 1
+          fi
+          if [ "$(id "$image:latest")" = "$(id "$image:$version-cuda")" ]; then
+            echo "latest is the CUDA build; CPU users would pull multiple gigabytes and a GPU requirement" >&2
+            exit 1
+          fi
+
+          # A backstop that does not depend on the digests lining up. Measured at 1.0.3: the
+          # CPU image is 432 MB and the CUDA one 1816 MB, so a swap shows up in the size too.
+          size=$(docker image inspect --format '{{.Size}}' "$image:latest")
+          echo "latest is $((size / 1048576)) MB"
+          if [ "$size" -gt 1000000000 ]; then echo "latest is too big to be the CPU build" >&2; exit 1; fi
+
+          # Running the CLI inside the image catches a runtime dependency missing from the
+          # image itself, which a test suite running against the source cannot see.
+          test "$(docker run --rm "$image:latest" --version)" = "$version"
+          docker run --rm "$image:latest" doctor --help > /dev/null
+          docker run --rm "$image:$version-cuda" --version > /dev/null
+
+  published-package:
+    needs: pypi
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: The version on PyPI installs clean and is the one just tagged
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # PyPI's index lags the upload by a minute or two, so give it a few tries.
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if pip download --no-deps --dest /tmp/dl "immich-moments==$version"; then break; fi
+            echo "not on the index yet, attempt $attempt"; sleep 30
+          done
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install --quiet "immich-moments==$version"
+          test "$(/tmp/fresh/bin/immich-moments --version)" = "$version"
+          /tmp/fresh/bin/immich-moments doctor --help > /dev/null
