@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.1.1 - 2026-09-16
+
+### Fixed
+
+- "Open in Immich" opens. Beside Immich in compose, which is how the README says to run it,
+  `IMMICH_URL` is a service name like `http://immich-server:2283`. That is the right address
+  for the API and an address no browser can follow, so every link on every card was dead. Set
+  `IMMICH_PUBLIC_URL` to the address you use and links go there; leave it out and nothing
+  changes. `doctor` says so when the link would only resolve inside the container network.
+
 ## 1.1.0 - 2026-09-16
 
 ### Changed

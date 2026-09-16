@@ -141,6 +141,17 @@ def test_search_returns_a_serialised_hit(client: TestClient) -> None:
     assert top["immich_url"] == "http://immich.test/photos/birthday"
 
 
+def test_the_card_links_to_the_public_url_not_the_api_one(seeded: Config) -> None:
+    """In compose the API is a service name, and a link to it opens nothing anywhere."""
+    seeded.immich_url = "http://immich-server:2283"
+    seeded.immich_public_url = "http://nas.local:2283"
+    app = create_app(seeded, immich_transport=immich_transport(), ml_transport=ml_transport(CANDLES))
+    with TestClient(app) as client:
+        body = client.get("/api/search", params={"q": "blowing out candles"}).json()
+
+    assert body["hits"][0]["immich_url"] == "http://nas.local:2283/photos/birthday"
+
+
 def test_the_weight_slider_reaches_the_ranking(client: TestClient) -> None:
     text_only = client.get("/api/search", params={"q": "happy birthday", "weight": 0.0}).json()
     assert text_only["weight"] == 0.0

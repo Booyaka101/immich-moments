@@ -147,10 +147,10 @@ def create_app(
             "albums": in_albums,
             "since": first,
             "until": last,
-            "like": reference.as_dict(config.immich_url) if reference else None,
+            "like": reference.as_dict(config.browser_url) if reference else None,
             "weight": config.visual_weight if weight is None else weight,
             "count": len(hits),
-            "hits": [hit.as_dict(config.immich_url) for hit in hits],
+            "hits": [hit.as_dict(config.browser_url) for hit in hits],
         }
 
     @app.get("/thumbs/{name}")

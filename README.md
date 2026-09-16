@@ -72,9 +72,10 @@ Immich's own compose file:
 ```yaml
 services:
   immich-moments:
-    image: ghcr.io/booyaka101/immich-moments:1.1.0
+    image: ghcr.io/booyaka101/immich-moments:1.1.1
     environment:
       IMMICH_URL: http://immich-server:2283
+      IMMICH_PUBLIC_URL: http://localhost:2283   # where your browser reaches Immich
       IMMICH_API_KEY: ${IMMICH_API_KEY}
       IMMICH_ML_URL: http://immich-machine-learning:3003
     volumes:
@@ -591,6 +592,8 @@ command line flag wins over both.
 | Setting | Variable | Default | What it does |
 |---|---|---|---|
 | `immich_url` | `IMMICH_URL` | none | Your Immich server |
+
+| `immich_public_url` | `IMMICH_PUBLIC_URL` | `immich_url` | Where your browser reaches Immich, if that is not the same address |
 | `immich_api_key` | `IMMICH_API_KEY` | none | API key from Account Settings |
 | `ml_url` | `IMMICH_ML_URL` | `http://localhost:3003` | Immich's ML container |
 | `data_dir` | `DATA_DIR` | `~/.local/share/immich-moments` | Index, thumbnails, vectors |
