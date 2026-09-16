@@ -55,6 +55,12 @@ First release.
 - `search --album NAME`, and the album menu in the UI: narrows the search to the videos in an
   Immich album. Membership is per video, repeatable, and re-read on every `index` run, so a
   video that moves between albums follows on the next one.
+- The web UI searches as you type, cross-fades the results where the browser supports view
+  transitions, follows the system light or dark setting with a toggle that overrides it, drops
+  to one column on a phone, and says which side of the blend found each scene with the raw
+  cosine or BM25 value in the tooltip. `/`, `Esc` and `?` are bound.
+- `index` shows a progress bar per phase with a remaining-time estimate when it is attached to
+  a terminal, and keeps the plain one-line-per-video output when it is piped.
 - Configuration from environment variables or an `immich-moments.toml`.
 - A Docker image and a compose snippet that sits beside an existing Immich stack.
 

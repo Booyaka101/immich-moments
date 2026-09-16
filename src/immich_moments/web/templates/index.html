@@ -3,46 +3,94 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Scene, face and speech search for the videos in your Immich library.">
 <title>immich-moments</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css">
+<script>
+  // Before first paint, so a reload does not flash the other theme.
+  const saved = localStorage.getItem("moments-theme");
+  if (saved) document.documentElement.dataset.theme = saved;
+</script>
 </head>
 <body>
+<a class="skip" href="#results">Skip to results</a>
+
 <header>
-  <h1>immich&#8209;moments</h1>
-  <form id="search" autocomplete="off">
-    <input id="q" name="q" type="search" placeholder="blowing out candles" autofocus>
-    <button type="submit">Search</button>
-  </form>
-  <div class="knob">
-    <label for="weight">speech</label>
-    <input id="weight" type="range" min="0" max="1" step="0.05" value="{{ stats.visual_weight }}">
-    <label for="weight">vision</label>
-    <span id="weight-value">{{ stats.visual_weight }}</span>
-    <label for="people">who</label>
-    <select id="people">
-      <option value="">anyone</option>
-    </select>
-    <label for="albums">album</label>
-    <select id="albums">
-      <option value="">any album</option>
-    </select>
-    <label for="since">taken</label>
-    <input id="since" type="date" title="Only videos taken on or after this day">
-    <label for="until">to</label>
-    <input id="until" type="date" title="Only videos taken on or before this day">
-    <div id="filters" class="chips"></div>
+  <div class="masthead">
+    <h1><img src="/static/icon.svg" alt="" width="26" height="26">immich&#8209;moments</h1>
+    <p class="stats">
+      <span><b>{{ stats.scenes }}</b> scenes</span>
+      <span><b>{{ stats.assets }}</b> videos</span>
+      <span><b>{{ stats.segments }}</b> transcript segments</span>
+      <span><b>{{ stats.people }}</b> known faces</span>
+      <span class="model" title="The CLIP model these vectors were made with">{{ stats.clip_model }}</span>
+    </p>
+    <div class="tools">
+      <button id="theme" class="icon-button" type="button" title="Switch between light and dark">
+        <span aria-hidden="true">◐</span><span class="sr-only">Switch theme</span>
+      </button>
+      <button class="icon-button" type="button" popovertarget="shortcuts" title="Keyboard shortcuts">
+        <span aria-hidden="true">?</span><span class="sr-only">Keyboard shortcuts</span>
+      </button>
+    </div>
   </div>
-  <p class="stats">
-    {{ stats.scenes }} scenes across {{ stats.assets }} videos,
-    {{ stats.segments }} transcript segments, {{ stats.people }} known faces.
-    <span class="model">{{ stats.clip_model }}</span>
-  </p>
+
+  <form id="search" role="search" autocomplete="off">
+    <div class="field">
+      <svg class="field-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/>
+      </svg>
+      <label class="sr-only" for="q">What are you looking for</label>
+      <input id="q" name="q" type="search" enterkeyhint="search" autofocus
+             placeholder="blowing out candles" aria-describedby="hint">
+    </div>
+    <button class="primary" type="submit">Search</button>
+  </form>
+
+  <div class="controls">
+    <span class="control">
+      <label for="people">who</label>
+      <select id="people"><option value="">anyone</option></select>
+    </span>
+    <span class="control">
+      <label for="albums">album</label>
+      <select id="albums"><option value="">any album</option></select>
+    </span>
+    <span class="control">
+      <label for="since">taken</label>
+      <input id="since" type="date" title="Only videos taken on or after this day">
+      <label for="until">to</label>
+      <input id="until" type="date" title="Only videos taken on or before this day">
+    </span>
+    <span class="control blend">
+      <label for="weight">speech</label>
+      <input id="weight" type="range" min="0" max="1" step="0.05" value="{{ stats.visual_weight }}"
+             title="How much of the score comes from the picture rather than the transcript">
+      <label for="weight">vision</label>
+      <output id="weight-value" for="weight">{{ stats.visual_weight }}</output>
+    </span>
+  </div>
+
+  <div id="filters" class="chips" aria-label="Active filters"></div>
 </header>
 
 <main>
-  <p id="hint" class="note">Type what you remember, or pick who is in it. Scene vectors and the transcript are searched together.</p>
-  <div id="results"></div>
+  <p id="hint" class="note" role="status" aria-live="polite">Type what you remember, or pick who is in it. Scene vectors and the transcript are searched together.</p>
+  <div id="results" tabindex="-1"></div>
 </main>
+
+<div id="shortcuts" popover>
+  <h2>Keyboard</h2>
+  <dl>
+    <dt><kbd>/</kbd></dt><dd>jump to the search box</dd>
+    <dt><kbd>Esc</kbd></dt><dd>clear the box, then the filters</dd>
+    <dt><kbd>Enter</kbd></dt><dd>search</dd>
+    <dt><kbd>?</kbd></dt><dd>this panel</dd>
+  </dl>
+  <p class="note">Everything you pick lives in the URL, so a search is a link you can keep.</p>
+  <button class="primary" type="button" popovertarget="shortcuts" popovertargetaction="hide">Close</button>
+</div>
 
 <script src="/static/app.js"></script>
 </body>

@@ -161,6 +161,9 @@ no speech found          5
 └──────────┴────────┴─────────┴───────────┘
 ```
 
+In a terminal those per-video lines are a progress bar with a remaining-time estimate instead,
+one per phase. Piped or redirected, you get the plain lines above.
+
 Those numbers are a real run over 16 videos, 31 minutes of footage, on an RTX 4090 with
 Immich's ML container on the same box. Most of the visual time is downloading originals and
 decoding them, not the model.
@@ -482,12 +485,19 @@ immich-moments on http://127.0.0.1:8099
 ```
 
 One page, one search box, a slider for the blend, thumbnails, and a link into Immich for every
-scene. The `who` menu lists the people the index knows and how many scenes each is in, and the
-name under any result filters on that person when you click it. The `album` menu next to it
-does the same for Immich albums, with the videos each one holds. The two date boxes bound the
-range the videos were filmed in. "more like this" on a card ranks the whole index against that
-scene's picture. The query, the filters and the scene being ranked against all live in the URL,
+scene. Results come in as you type, after a short pause, so you can feel your way towards the
+right words. The `who` menu lists the people the index knows and how many scenes each is in,
+and the name under any result filters on that person when you click it. The `album` menu next
+to it does the same for Immich albums, with the videos each one holds. The two date boxes bound
+the range the videos were filmed in. "more like this" on a card ranks the whole index against
+that scene's picture. The query, the filters and the scene being ranked against all live in the URL,
 so a search is a link you can keep.
+
+Every result says which side of the blend found it, picture or speech, with the raw cosine or
+BM25 value behind the tooltip, so a surprising hit is explainable rather than magic. The page
+follows whatever light or dark your system is set to, and the toggle in the corner overrides
+it. It drops to one column on a phone and respects `prefers-reduced-motion`. Press `/` to jump
+to the box, `Esc` to clear it and then the filters, and `?` for the rest.
 
 ### write it back into Immich
 

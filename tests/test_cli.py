@@ -11,9 +11,11 @@ import sys
 
 import numpy as np
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from immich_moments import __version__
+from immich_moments import cli as cli_module
 from immich_moments.cli import app, main
 from immich_moments.config import Config
 from immich_moments.errors import ConfigError, ImmichError, StorageError
@@ -410,3 +412,20 @@ def test_an_album_the_index_has_never_seen_is_not_silently_empty(
     assert code == ConfigError.exit_code
     assert "Holiday" in captured.err
     assert "Indexed albums: Föhr 2026" in captured.err
+
+
+def test_a_piped_index_keeps_one_plain_line_per_video(capsys) -> None:
+    """The README captures these lines, and a log file wants them unadorned."""
+    with cli_module._index_progress() as report:
+        report("visual", 2, 7, "beach [4k].mp4")
+    assert capsys.readouterr().out.strip() == "visual 2/7  beach [4k].mp4"
+
+
+def test_a_terminal_index_gets_a_bar_per_phase(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    monkeypatch.setattr(cli_module, "console", Console(force_terminal=True, width=100))
+    with cli_module._index_progress() as report:
+        report("visual", 1, 2, "beach.mp4")
+        report("speech", 1, 1, "beach.mp4")
+    out = capsys.readouterr().out
+    assert "visual" in out and "speech" in out
+    assert "/2" in out

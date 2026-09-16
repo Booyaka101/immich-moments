@@ -42,7 +42,7 @@ footage, 8 named people.
 | `doctor` on a failed video | lists it by name with the ffmpeg error, and still exits 0 |
 | `--album` and the album menu | made two albums in Immich over 6 and 2 of the 16 videos, one `index` run picked both up in 0.1s, `search --album "Night shoots"` returned only that album's scenes, and the UI round-trips `?q=...&album=Night+shoots` |
 
-Test suite: 280 passed, including the two slow tests that really run Whisper. The fast subset
+Test suite: 283 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Known limits, written down rather than hidden
@@ -172,6 +172,33 @@ Left out, with the reason, in the order I would build them next.
 6. A retry budget. A file that fails every time is downloaded again on every run. Counting the
    attempts and backing off needs a column and a flag to force a retry anyway, and getting the
    backoff wrong would hide a video that a fixed ML container would now index.
+
+## Presentation pass
+
+Every surface a user actually sees, gone over once with the current platform rather than a
+2018 one.
+
+- The page is rebuilt on `light-dark()` over oklch tokens with `color-mix` for the soft
+  variants, so one token block covers both themes and the `@supports` fallback covers the
+  browsers that lack it. The toggle writes `data-theme` and an inline script applies it before
+  first paint, so a reload never flashes the other theme.
+- Searching happens as you type after a 350 ms pause, with an `AbortController` cancelling the
+  superseded request. A skeleton grid only appears if the answer takes longer than 200 ms,
+  below which a spinner reads as a glitch rather than as progress.
+- Result swaps go through `document.startViewTransition` where it exists, and straight through
+  where it does not or where the user asked for reduced motion.
+- Each card says which side of the blend found it, with the raw cosine or BM25 in the tooltip.
+  A blended contribution bar was considered and dropped: cosine and BM25 are not on comparable
+  scales, so any split shown would have been invented.
+- The empty result offers the narrowings in play as one-click removals, since dropping a
+  filter is the usual way out of no results.
+- `/`, `Esc`, `?` are bound, `?` works from the autofocused box as long as it is empty, and
+  the panel is a native `popover` rather than a hand-rolled modal.
+- The phone layout unsticks the header and drops to one column. A sticky header with wrapped
+  controls ate most of a 390px viewport.
+- `index` on a terminal is a `rich` progress bar per phase with a remaining-time estimate.
+  Piped, it still prints one plain line per video, which is what the README captures and what
+  a log file wants.
 
 ## Distribution
 

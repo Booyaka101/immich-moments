@@ -104,6 +104,15 @@ def test_the_page_renders_with_the_index_stats(client: TestClient) -> None:
     assert "/static/app.js" in body
 
 
+def test_the_page_carries_its_own_icon_and_help(client: TestClient) -> None:
+    body = client.get("/").text
+    assert 'href="/static/icon.svg"' in body
+    assert 'id="shortcuts" popover' in body
+    icon = client.get("/static/icon.svg")
+    assert icon.status_code == 200
+    assert icon.headers["content-type"].startswith("image/svg+xml")
+
+
 def test_stats_reports_what_is_indexed(client: TestClient) -> None:
     stats = client.get("/api/stats").json()
     assert stats["assets"] == 1

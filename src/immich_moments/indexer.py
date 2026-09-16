@@ -27,7 +27,8 @@ from .store import SceneRecord, Store
 
 log = logging.getLogger(__name__)
 
-Progress = Callable[[str], None]
+# phase, this asset's position, how many are pending, its file name.
+Progress = Callable[[str, int, int, str], None]
 
 
 @dataclass
@@ -77,7 +78,7 @@ class Indexer:
         self.store = store
         self.immich = immich
         self.ml = ml
-        self.say: Progress = progress or (lambda _message: None)
+        self.say: Progress = progress or (lambda *_: None)
 
     # ---- phases ----------------------------------------------------------
 
@@ -150,7 +151,7 @@ class Indexer:
         pending = self.store.assets_needing("visual")[: limit or None]
         timing = report.timing("visual")
         for position, asset in enumerate(pending, start=1):
-            self.say(f"visual {position}/{len(pending)}  {asset['original_file_name']}")
+            self.say("visual", position, len(pending), asset["original_file_name"])
             started = time.monotonic()
             try:
                 scenes = self._index_one_visual(asset["id"], labels, people)
@@ -181,7 +182,7 @@ class Indexer:
         timing = report.timing("speech")
         try:
             for position, asset in enumerate(pending, start=1):
-                self.say(f"speech {position}/{len(pending)}  {asset['original_file_name']}")
+                self.say("speech", position, len(pending), asset["original_file_name"])
                 started = time.monotonic()
                 try:
                     count = self._index_one_audio(asset["id"], transcriber)

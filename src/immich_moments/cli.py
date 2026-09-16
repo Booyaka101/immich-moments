@@ -12,6 +12,14 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.markup import escape
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
 from rich.table import Table
 
 from . import __version__
@@ -219,19 +227,20 @@ def index(
         console.print(
             f"[dim]clip={clip_model} ({dimension}-dim)  faces={face_model}  data={config.data_dir}[/]"
         )
-        report = run_index(
-            config,
-            store,
-            immich,
-            ml,
-            since=None if prune else _since(store, since),
-            limit=limit,
-            phases=phases,
-            labels_path=labels,
-            reindex=reindex,
-            prune=prune,
-            progress=lambda message: console.print(f"[dim]{escape(message)}[/]"),
-        )
+        with _index_progress() as report_progress:
+            report = run_index(
+                config,
+                store,
+                immich,
+                ml,
+                since=None if prune else _since(store, since),
+                limit=limit,
+                phases=phases,
+                labels_path=labels,
+                reindex=reindex,
+                prune=prune,
+                progress=report_progress,
+            )
         _print_report(report)
 
         if write_back:
@@ -452,12 +461,18 @@ def _score_column(query: str, reference: Hit | None) -> str:
 
 @app.command()
 def serve(
-    host: Annotated[str | None, typer.Option("--host")] = None,
-    port: Annotated[int | None, typer.Option("--port")] = None,
+    host: Annotated[
+        str | None, typer.Option("--host", help="Address to bind. Defaults to 127.0.0.1.")
+    ] = None,
+    port: Annotated[int | None, typer.Option("--port", help="Port to listen on. Defaults to 8099.")] = None,
     config_path: ConfigOption = None,
     verbose: VerboseOption = False,
 ) -> None:
-    """Start the web UI."""
+    """Serve the search page: one box, thumbnails, filters, and a link into Immich per scene.
+
+    It listens on localhost and has no authentication of its own, so put it behind something
+    that does before you give it an address the rest of the network can reach.
+    """
     import uvicorn
 
     config = _setup(config_path, verbose, host=host, port=port)
@@ -469,7 +484,9 @@ def serve(
         clip_model, _face = immich.model_names()
         store.assert_model(clip_model)
 
-    console.print(f"immich-moments on http://{config.host}:{config.port}")
+    url = f"http://{config.host}:{config.port}"
+    # A link, so terminals that support OSC 8 make it clickable and the rest print the same text.
+    console.print(f"immich-moments on [link={url}]{url}[/]")
     uvicorn.run(create_app(config), host=config.host, port=config.port, log_level="info")
 
 
@@ -551,6 +568,47 @@ def _print_report(report) -> None:
         per = f"{entry.seconds / entry.assets:.1f}s" if entry.assets else "-"
         timings.add_row(entry.name, str(entry.assets), f"{entry.seconds:.1f}", per)
     console.print(timings)
+
+
+@contextlib.contextmanager
+def _index_progress():
+    """A live bar per phase on a terminal, one plain line per video when the output is piped.
+
+    Indexing a library is a long wait, so a terminal gets a bar with a remaining-time estimate.
+    A log file or a pipe gets the plain lines, which stay readable and diff cleanly.
+    """
+    if not console.is_terminal:
+        yield lambda phase, position, total, name: console.print(
+            f"[dim]{phase} {position}/{total}  {escape(name)}[/]"
+        )
+        return
+
+    bar = Progress(
+        SpinnerColumn(style="cyan"),
+        TextColumn("[bold]{task.description}[/]"),
+        BarColumn(complete_style="cyan", finished_style="cyan"),
+        MofNCompleteColumn(),
+        TimeRemainingColumn(compact=True, elapsed_when_finished=True),
+        TextColumn("[dim]{task.fields[name]}[/]"),
+        console=console,
+        transient=True,
+    )
+    tasks: dict[str, tuple[int, int]] = {}
+    with bar:
+
+        def report(phase: str, position: int, total: int, name: str) -> None:
+            if phase not in tasks:
+                # The phases run one after the other, so anything already on screen is finished.
+                for done_id, done_total in tasks.values():
+                    bar.update(done_id, completed=done_total)
+                tasks[phase] = (bar.add_task(phase, total=total, name=""), total)
+            task_id, _total = tasks[phase]
+            # The callback fires before the work, so the bar shows what is finished behind it.
+            bar.update(task_id, completed=position - 1, total=total, name=escape(_shorten(name, 30)))
+
+        yield report
+        for task_id, total in tasks.values():
+            bar.update(task_id, completed=total)
 
 
 def _print_writeback(result) -> None:
