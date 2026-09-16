@@ -16,6 +16,17 @@ CONFIG_FILENAME = "immich-moments.toml"
 _BOOL_TRUE = {"1", "true", "yes", "on"}
 _BOOL_FALSE = {"0", "false", "no", "off"}
 
+# Options that used to exist under another name. Dropping them quietly would leave the old
+# setting in place doing nothing, which is exactly how the label floor went wrong.
+RENAMED = {
+    "label_min_similarity": (
+        "label_min_zscore",
+        "the label floor is now how many standard deviations the winning label sits above the "
+        "rest of the vocabulary, because a raw cosine means different things to different CLIP "
+        "models. The default 2.3 reproduces what 0.22 did under ViT-B-32__openai",
+    ),
+}
+
 
 @dataclass(slots=True)
 class Config:
@@ -42,7 +53,7 @@ class Config:
 
     # search
     visual_weight: float = 0.65
-    label_min_similarity: float = 0.22
+    label_min_zscore: float = 2.3
 
     # transport
     request_timeout: float = 60.0
@@ -144,6 +155,9 @@ def load_config(config_path: Path | None = None, overrides: dict[str, object] | 
         if not isinstance(section, dict):
             raise ConfigError(f"{path}: [immich_moments] must be a table")
         unknown = set(section) - set(types)
+        for name in sorted(unknown & set(RENAMED)):
+            new, why = RENAMED[name]
+            raise ConfigError(f"{path}: {name} is now {new}, and {why}.")
         if unknown:
             raise ConfigError(f"{path}: unknown option(s) {', '.join(sorted(unknown))}")
         resolved.update(section)
@@ -158,6 +172,11 @@ def load_config(config_path: Path | None = None, overrides: dict[str, object] | 
         var = env_map.get(name, "IMMICH_MOMENTS_" + name.upper())
         if var in os.environ and os.environ[var] != "":
             resolved[name] = os.environ[var]
+
+    for name, (new, why) in RENAMED.items():
+        var = "IMMICH_MOMENTS_" + name.upper()
+        if os.environ.get(var):
+            raise ConfigError(f"{var} is now IMMICH_MOMENTS_{new.upper()}, and {why}.")
 
     for name, value in (overrides or {}).items():
         if value is not None:

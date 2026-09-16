@@ -74,6 +74,22 @@ def test_an_unknown_option_is_named_not_ignored(tmp_path: Path) -> None:
         load_config(path)
 
 
+def test_a_renamed_option_says_what_it_became(tmp_path: Path) -> None:
+    """Left as an unknown option it would read as a typo, and left out it would go on doing nothing."""
+    path = tmp_path / "old.toml"
+    path.write_text("[immich_moments]\nlabel_min_similarity = 0.22\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="label_min_similarity is now label_min_zscore"):
+        load_config(path)
+
+
+def test_the_renamed_environment_variable_is_refused_not_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMMICH_MOMENTS_LABEL_MIN_SIMILARITY", "0.22")
+    with pytest.raises(ConfigError, match="IMMICH_MOMENTS_LABEL_MIN_ZSCORE"):
+        load_config()
+
+
 def test_broken_toml_names_the_file(tmp_path: Path) -> None:
     path = tmp_path / "broken.toml"
     path.write_text("[immich_moments\nimmich_url = ", encoding="utf-8")

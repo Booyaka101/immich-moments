@@ -323,7 +323,7 @@ def run_index(
             ml,
             config.data_dir,
             labels_path=labels_path,
-            min_similarity=config.label_min_similarity,
+            min_zscore=config.label_min_zscore,
         )
         indexer.visual_pass(report, labels, limit)
 

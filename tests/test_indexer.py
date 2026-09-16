@@ -135,6 +135,9 @@ def index(
     prune: bool = False,
 ):
     store.check_model("test-clip", DIM, reindex=False)
+    # Three labels cannot put any of them 2.3 deviations above the other two, and these tests
+    # are about the indexing around the labels rather than about the floor.
+    config.label_min_zscore = 1.0
     with (
         ImmichClient(
             config, transport=immich_transport(video, missing=missing, people=people, albums=albums)

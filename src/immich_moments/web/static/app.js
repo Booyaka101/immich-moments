@@ -20,14 +20,15 @@ let inflight = null;
 let typing = null;
 let slow = null;
 
+// The server renders its configured blend into the slider, so this is the value a URL can leave
+// out. Anything else has to travel in the link, or a shared result set is not the one you saw.
+const DEFAULT_WEIGHT = weight.value;
 const TYPING_PAUSE = 350;
 // Below this a spinner state would flash and read as a glitch, so the old results just stay.
 const SKELETON_AFTER = 200;
 const EXAMPLES = ["blowing out candles", "a train at night", "someone laughing", "a birthday cake"];
 
-weight.addEventListener("input", () => {
-  weightValue.textContent = Number(weight.value).toFixed(2);
-});
+weight.addEventListener("input", showWeight);
 weight.addEventListener("change", () => {
   if (box.value.trim()) run();
 });
@@ -106,6 +107,8 @@ function anything() {
 function readUrl(push) {
   const params = new URLSearchParams(location.search);
   box.value = params.get("q") || "";
+  weight.value = params.get("weight") || DEFAULT_WEIGHT;
+  showWeight();
   like = params.get("like") ? Number(params.get("like")) : null;
   since.value = params.get("since") || "";
   until.value = params.get("until") || "";
@@ -203,10 +206,15 @@ function drawFilters() {
   }
 }
 
+function showWeight() {
+  weightValue.textContent = Number(weight.value).toFixed(2);
+}
+
 function searchParams() {
   const params = new URLSearchParams();
   const query = box.value.trim();
   if (query) params.set("q", query);
+  if (weight.value !== DEFAULT_WEIGHT) params.set("weight", weight.value);
   if (like) params.set("like", String(like));
   if (since.value) params.set("since", since.value);
   if (until.value) params.set("until", until.value);
@@ -238,7 +246,7 @@ async function run(push = true) {
   clearTimeout(slow);
   slow = setTimeout(() => mine === inflight && showSkeletons(), SKELETON_AFTER);
   try {
-    const url = `/api/search?${params}&limit=24&weight=${weight.value}`;
+    const url = `/api/search?${params}&limit=24`;
     const response = await fetch(url, { signal: mine.signal });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || data.detail || response.statusText);

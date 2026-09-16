@@ -1,6 +1,6 @@
 # PROGRESS
 
-Status: v1.0.5 published. PyPI, GHCR and the GitHub repository are live.
+Status: v1.1.0 published. PyPI, GHCR and the GitHub repository are live.
 
 ## What exists
 
@@ -239,10 +239,34 @@ Every surface a user actually sees, gone over once with the current platform rat
   Piped, it still prints one plain line per video, which is what the README captures and what
   a log file wants.
 
+## Run against a second CLIP model
+
+Immich's CLIP model is a server setting, not one of ours, so whatever it is configured with is
+what scenes get embedded with. Everything up to 1.0.5 had only ever been run against the Immich
+default, `ViT-B-32__openai`. Pointing the same 16-video library at `ViT-L-16-SigLIP-384__webli`
+found one bug and put a number on the trade.
+
+The bug: every scene came out with no label at all, silently. Labels keep the closest phrase
+from the vocabulary if it clears `label_min_similarity`, default 0.22, and that number was an
+OpenAI-CLIP cosine. Over the same 211 scenes and 234 labels the winner scores a median 0.256
+under ViT-B-32 and 0.066 under SigLIP, whose rows average below zero. Standardising the row
+first makes the two agree: median z 3.26 either way, p5 2.54 against 2.69. A floor of 2.3
+labels 210 of 211 scenes under ViT-B-32, against the 209 that 0.22 labelled, and 211 of 211
+under SigLIP against none. So the floor is now `label_min_zscore`, and the old name is refused
+rather than ignored.
+
+The trade: one frame through the ML container takes 0.045s on ViT-B-32 and 1.35s on
+ViT-L-16-SigLIP-384, both on CPU, so the visual phase over this library went from about a
+minute to 507 seconds. What that buys is the ranking. "food on a table" moved from a rendered
+glass on a table, three of the top six, to the actual diner scene at ranks one, four and five.
+"a person crying" moved from four scenes labelled "a dark indoor scene" to the close-up of a
+face that is the answer. Worth it for a library indexed once, and the reason the README no
+longer implies the default is the only option.
+
 ## Distribution
 
 Published on the owner's instruction: `github.com/Booyaka101/immich-moments`,
-`pypi.org/project/immich-moments`, and `ghcr.io/booyaka101/immich-moments` on the v1.0.5 tag.
+`pypi.org/project/immich-moments`, and `ghcr.io/booyaka101/immich-moments` on the v1.1.0 tag.
 
 1.0.0 and 1.0.1 were uploaded to PyPI with the account token, because trusted publishing needs
 a pending publisher registered on pypi.org and that is a logged-in browser step. Registering it
@@ -256,7 +280,8 @@ want it, which beats a cold post to r/selfhosted. r/selfhosted after that.
 
 ## Repository state
 
-- Version 1.0.3 everywhere: `pyproject.toml`, `CHANGELOG.md`, the compose example.
+- Version 1.1.0 everywhere: `pyproject.toml`, `CHANGELOG.md`, the compose example, the README's
+  compose snippet and the status line at the top of this file.
 - `ruff check` and `ruff format --check` clean.
 - CI workflow covers 3.12 and 3.13 on Ubuntu and Windows, lint, packaging, and a Docker build.
 - Release workflow is tag-triggered, re-verifies, and refuses a tag that disagrees with
