@@ -3,6 +3,12 @@
 There is no captioning model in this stack, so a scene's human-readable label comes from
 matching its CLIP vector against a fixed vocabulary embedded with the same text encoder.
 The embeddings are cached per (model, vocabulary) so the pass runs once, not once per video.
+
+A scene only keeps its winning label if that label beats the rest of the vocabulary by enough,
+measured in standard deviations of the scene's own scores rather than in raw cosine. Cosine is
+not comparable across CLIP models: over the same 211 scenes and 234 labels, the winner scores a
+median 0.256 under `ViT-B-32__openai` and 0.066 under `ViT-L-16-SigLIP-384__webli`, whose scores
+average below zero. Standardised, both land on a median of 3.26.
 """
 
 from __future__ import annotations
@@ -10,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 from pathlib import Path
 
 import numpy as np
@@ -36,10 +43,20 @@ def read_labels(path: Path | None = None) -> list[str]:
 
 
 class LabelIndex:
-    def __init__(self, labels: list[str], matrix: np.ndarray, min_similarity: float) -> None:
+    def __init__(self, labels: list[str], matrix: np.ndarray, min_zscore: float) -> None:
+        # One label is never a standard deviation above itself, and n labels cannot put the
+        # winner further than sqrt(n-1) above the mean. A vocabulary too short for the floor
+        # would label nothing at all, silently, which is the failure this floor exists to avoid.
+        reachable = math.sqrt(len(labels) - 1) if labels else 0.0
+        if labels and reachable < min_zscore:
+            raise ConfigError(
+                f"{len(labels)} label(s) cannot reach a z of {min_zscore:g}: the most any one of "
+                f"them can sit above the others is {reachable:.2f}. Use a longer vocabulary, or "
+                f"lower label_min_zscore below {reachable:.2f}."
+            )
         self.labels = labels
         self.matrix = matrix
-        self.min_similarity = min_similarity
+        self.min_zscore = min_zscore
 
     def best(self, vector: np.ndarray) -> tuple[str, float] | None:
         return self.best_many(vector.reshape(1, -1))[0]
@@ -49,23 +66,26 @@ class LabelIndex:
         if not self.labels or vectors.size == 0:
             return [None] * len(vectors)
         scores = vectors @ self.matrix.T
+        # Standardising is monotonic within a row, so the winner is the same one argmax finds.
         winners = np.argmax(scores, axis=1)
         tops = scores[np.arange(len(vectors)), winners]
+        spread = scores.std(axis=1)
+        above = np.divide(tops - scores.mean(axis=1), spread, out=np.zeros_like(tops), where=spread > 0)
         return [
-            (self.labels[int(winner)], float(top)) if top >= self.min_similarity else None
-            for winner, top in zip(winners, tops, strict=True)
+            (self.labels[int(winner)], float(z)) if z >= self.min_zscore else None
+            for winner, z in zip(winners, above, strict=True)
         ]
 
 
 def build_label_index(
-    ml: MLClient, cache_dir: Path, *, labels_path: Path | None, min_similarity: float
+    ml: MLClient, cache_dir: Path, *, labels_path: Path | None, min_zscore: float
 ) -> LabelIndex:
     labels = read_labels(labels_path)
     cache = cache_dir / f"labels-{_fingerprint(ml.clip_model, labels)}.npz"
     if cache.exists():
         try:
             with np.load(cache, allow_pickle=False) as data:
-                return LabelIndex(labels, data["matrix"], min_similarity)
+                return LabelIndex(labels, data["matrix"], min_zscore)
         except (OSError, ValueError, KeyError):
             cache.unlink(missing_ok=True)
 
@@ -76,7 +96,7 @@ def build_label_index(
         np.savez(cache, matrix=matrix)
     except OSError as exc:
         log.warning("could not cache label embeddings at %s: %s", cache, exc)
-    return LabelIndex(labels, matrix, min_similarity)
+    return LabelIndex(labels, matrix, min_zscore)
 
 
 def _fingerprint(model: str, labels: list[str]) -> str:

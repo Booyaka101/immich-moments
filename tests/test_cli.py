@@ -324,7 +324,7 @@ def stub_labels(monkeypatch: pytest.MonkeyPatch, *, wins: str) -> None:
     """Every scene lands on one label, whatever its vector, so the diff is the thing under test."""
     monkeypatch.setattr(
         "immich_moments.cli.build_label_index",
-        lambda *_a, **_k: LabelIndex([wins], np.ones((1, 8), np.float32), min_similarity=-1.0),
+        lambda *_a, **_k: LabelIndex([wins], np.ones((1, 8), np.float32), min_zscore=-1.0),
     )
 
 

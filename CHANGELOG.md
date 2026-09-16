@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.1.0 - 2026-09-16
+
+### Changed
+
+- `label_min_similarity` is now `label_min_zscore`, and `relabel --min-similarity` is
+  `--min-zscore`. The old names are refused with a message rather than quietly ignored. Nothing
+  else about your index changes and no reindex is needed.
+
+### Fixed
+
+- Scene labels survive a change of CLIP model. The floor a label had to clear was a raw cosine
+  tuned for `ViT-B-32__openai`, so pointing Immich at a SigLIP model left every scene with no
+  label at all and said nothing about it. The floor is now measured in standard deviations
+  above the rest of the vocabulary, which is comparable across models: over the same 211 scenes
+  the winning label scores a median 0.256 under ViT-B-32 and 0.066 under
+  `ViT-L-16-SigLIP-384__webli`, and 3.26 under both once standardised. The default 2.3
+  reproduces what 0.22 did under ViT-B-32 on that library, 210 scenes labelled against 209.
+- A vocabulary too short to ever clear the floor is refused when it is read, instead of
+  labelling nothing. The best of n labels can only stand sqrt(n-1) deviations above the rest.
+- The vision slider travels in the URL, so a link to a result set reproduces the blend it was
+  found with. It was the one control on the page that a shared link lost.
+
 ## 1.0.5 - 2026-09-16
 
 ### Fixed

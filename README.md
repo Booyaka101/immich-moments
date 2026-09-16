@@ -72,7 +72,7 @@ Immich's own compose file:
 ```yaml
 services:
   immich-moments:
-    image: ghcr.io/booyaka101/immich-moments:1.0.5
+    image: ghcr.io/booyaka101/immich-moments:1.1.0
     environment:
       IMMICH_URL: http://immich-server:2283
       IMMICH_API_KEY: ${IMMICH_API_KEY}
@@ -171,6 +171,14 @@ decoding them, not the model.
 It checkpoints after every asset, so an interrupted run continues where it stopped.
 `--since auto` (the default) only looks at assets added since the last run. `--reindex` throws
 the index away and rebuilds it, which is also what a change of CLIP model needs.
+
+The model is whichever one your Immich is configured with, under Administration, Settings,
+Machine Learning. A bigger one than Immich's `ViT-B-32__openai` default is worth considering if
+you index once and search often. On the library above, `ViT-L-16-SigLIP-384__webli` turned
+"food on a table" from three shots of a glass on a table into the three shots of people eating,
+at 1.35s a frame instead of 0.045s on the same CPU container. Changing it means a `--reindex`
+here and a re-run of Immich's own Smart Search job, since neither set of vectors is comparable
+with the last model's.
 
 Videos you trash in Immich do not leave the index on their own, because `--since auto` never
 hears about them. `--prune` walks the whole library instead and drops whatever Immich no
@@ -447,30 +455,34 @@ embedding pass over the word list rather than another pass over every video.
 
 ```
 $ immich-moments relabel --dry-run
-210 scene(s) with vectors, 209 labelled, 1 below the threshold
+211 scene(s) with vectors, 211 labelled, 0 below the threshold
 0 change(s): 0 newly labelled, 0 cleared, 0 moved to another label
 --dry-run: nothing written.
 
 $ immich-moments relabel --labels smaller.txt --dry-run
-210 scene(s) with vectors, 168 labelled, 42 below the threshold
-209 change(s): 0 newly labelled, 41 cleared, 168 moved to another label
+211 scene(s) with vectors, 37 labelled, 174 below the threshold
+194 change(s): 6 newly labelled, 157 cleared, 31 moved to another label
                   first changes                   
 ┌────────────────────────┬───────────────┬───────┐
-│ was                    │ now           │ score │
+│ was                    │ now           │     z │
 ├────────────────────────┼───────────────┼───────┤
-│ a black screen         │ the night sky │ 0.252 │
-│ a chess board          │ the night sky │ 0.251 │
-│ a title card with text │ -             │     - │
-│ a dj at a mixing desk  │ -             │     - │
-│ a black screen         │ the night sky │ 0.221 │
-│ a black screen         │ the night sky │ 0.220 │
 │ a black screen         │ -             │     - │
-│ a jigsaw puzzle        │ a train       │ 0.222 │
+│ a black screen         │ the night sky │ 2.318 │
+│ a title card with text │ -             │     - │
+│ a chess board          │ -             │     - │
+│ a chess board          │ -             │     - │
+│ a chess board          │ -             │     - │
+│ a black screen         │ -             │     - │
+│ a field of flowers     │ a garden      │ 2.426 │
+│ a field of flowers     │ a garden      │ 2.522 │
 │ a field of flowers     │ -             │     - │
-│ a jigsaw puzzle        │ -             │     - │
 └────────────────────────┴───────────────┴───────┘
 --dry-run: nothing written.
 ```
+
+Ten labels is a hard vocabulary to clear: the best of ten can only stand three deviations above
+the other nine, and most scenes here do not put one that far ahead of the rest. `--min-zscore`
+lowers the floor for a run without touching the config.
 
 With the default vocabulary it is a no-op, which is also the cheapest check that the stored labels
 still match the stored vectors. `--dry-run` prints the same summary and writes nothing. Tags
@@ -591,7 +603,7 @@ command line flag wins over both.
 | `whisper_device` | `IMMICH_MOMENTS_WHISPER_DEVICE` | `auto` | `cuda`, `cpu` or `auto` |
 | `whisper_language` | `IMMICH_MOMENTS_WHISPER_LANGUAGE` | detect | ISO code, e.g. `en` |
 | `visual_weight` | `IMMICH_MOMENTS_VISUAL_WEIGHT` | `0.65` | Vision against speech in the blend |
-| `label_min_similarity` | `IMMICH_MOMENTS_LABEL_MIN_SIMILARITY` | `0.22` | Below this a scene gets no label |
+| `label_min_zscore` | `IMMICH_MOMENTS_LABEL_MIN_ZSCORE` | `2.3` | How far above the rest of the vocabulary a label must sit, in standard deviations, to be used |
 | `port` | `IMMICH_MOMENTS_PORT` | `8099` | Web UI port |
 
 ```toml
@@ -639,9 +651,11 @@ full disk.
 
 ## Limitations
 
-- Scene labels come from a fixed vocabulary of about 120 English phrases
+- Scene labels come from a fixed vocabulary of 234 English phrases
   (`--labels your-own.txt` replaces it, and `relabel` swaps it without a reindex). They are a
-  caption, not a classifier.
+  caption, not a classifier. A vocabulary of a handful of phrases is refused rather than
+  labelling nothing: with n of them the best one can only stand sqrt(n-1) deviations above the
+  rest, so it has to be long enough to clear `label_min_zscore`.
 - Faces are matched against people you have already named in Immich. It will not find people
   Immich does not know, and it never creates or renames anyone. Naming someone later is
   enough: the next `index` run re-matches the faces it already holds.

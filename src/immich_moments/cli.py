@@ -60,7 +60,8 @@ ConfigOption = Annotated[
     Path | None, typer.Option("--config", "-c", help="Path to an immich-moments.toml file.")
 ]
 VerboseOption = Annotated[bool, typer.Option("--verbose", "-v", help="Show per-step logging.")]
-# What LabelIndex returns for one scene: the winning label and its cosine, or nothing.
+# What LabelIndex returns for one scene: the winning label and how far it stands above the
+# rest of the vocabulary, or nothing.
 Pick = tuple[str, float] | None
 
 
@@ -254,8 +255,13 @@ def relabel(
     labels: Annotated[
         Path | None, typer.Option("--labels", help="Custom scene label vocabulary, one per line.")
     ] = None,
-    min_similarity: Annotated[
-        float | None, typer.Option("--min-similarity", help="Below this a scene gets no label.")
+    min_zscore: Annotated[
+        float | None,
+        typer.Option(
+            "--min-zscore",
+            help="How far above the rest of the vocabulary the winning label has to sit, in "
+            "standard deviations. Below it a scene gets no label.",
+        ),
     ] = None,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Print what would change and write nothing.")
@@ -281,7 +287,7 @@ def relabel(
             ml,
             config.data_dir,
             labels_path=labels,
-            min_similarity=config.label_min_similarity if min_similarity is None else min_similarity,
+            min_zscore=config.label_min_zscore if min_zscore is None else min_zscore,
         )
         vectors = store.vectors().read_all()
         usable = [scene for scene in scenes if scene["vector_row"] < vectors.shape[0]]
@@ -324,7 +330,7 @@ def _print_relabel(total: int, picks: list[Pick], changes: list[tuple[int, str |
     table = Table(title="first changes", header_style="bold")
     table.add_column("was")
     table.add_column("now")
-    table.add_column("score", justify="right")
+    table.add_column("z", justify="right")
     for _id, old, pick in changes[:10]:
         table.add_row(escape(old or "-"), escape(pick[0] if pick else "-"), f"{pick[1]:.3f}" if pick else "-")
     console.print(table)
