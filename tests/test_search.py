@@ -22,6 +22,8 @@ from immich_moments.search import (
     date_range,
     format_timestamp,
     fts_query,
+    resolve_albums,
+    resolve_people,
     search,
     similar,
 )
@@ -487,3 +489,73 @@ def test_the_candidate_cut_narrows_what_is_scored_not_how_it_scores(
     assert len(cut) == 2
     assert cut_mean == pytest.approx(library_mean)
     assert all(cut[scene_id] == pytest.approx(scored[scene_id]) for scene_id in cut)
+
+
+def in_albums(store: Store) -> Store:
+    """The birthday is in Family 2026, the garden is in nothing."""
+    store.replace_albums([("birthday", "al1", "Family 2026")])
+    return store
+
+
+def test_an_album_filter_keeps_only_the_videos_it_holds(seeded: Store, config: Config) -> None:
+    with ml_returning(config, GARDEN) as ml:
+        hits = search(
+            in_albums(seeded), ml, "a garden", visual_weight=1.0, filters=Filters(albums=("Family 2026",))
+        )
+
+    assert {hit.asset_id for hit in hits} == {"birthday"}
+
+
+def test_an_album_filter_reaches_the_speech_channel_too(seeded: Store, config: Config) -> None:
+    """The FTS side joins through scenes, so a per-video filter has to reach it as well."""
+
+    def refuse(_request: httpx.Request) -> httpx.Response:  # pragma: no cover - must not run
+        raise AssertionError("a text-only search must not embed the query")
+
+    store = in_albums(seeded)
+    store.replace_transcript(
+        "garden", [TranscriptRecord(1.0, 3.0, "happy birthday to you")], indexed_at=NOW, has_audio=True
+    )
+    with MLClient(config, "c", "f", transport=httpx.MockTransport(refuse)) as ml:
+        hits = search(
+            store,
+            ml,
+            "happy birthday",
+            visual_weight=0.0,
+            filters=Filters(albums=("Family 2026",)),
+        )
+
+    assert {hit.asset_id for hit in hits} == {"birthday"}
+
+
+def test_two_albums_means_a_video_that_is_in_both(seeded: Store) -> None:
+    store = in_albums(seeded)
+    store.replace_albums([("birthday", "al1", "Family 2026"), ("garden", "al2", "Outdoors")])
+
+    assert browse(store, Filters(albums=("Family 2026", "Outdoors"))) == []
+    assert [hit.asset_id for hit in browse(store, Filters(albums=("Outdoors",)))] == ["garden"]
+
+
+def test_an_album_matches_whatever_case_you_type(seeded: Store) -> None:
+    store = in_albums(seeded)
+
+    assert resolve_albums(store, ["  fAMILY 2026 "]) == ["Family 2026"]
+
+
+def test_an_album_the_index_has_never_seen_is_an_error_not_an_empty_page(seeded: Store) -> None:
+    """Immich albums that hold only photos are not in the index, and a typo looks the same."""
+    store = in_albums(seeded)
+
+    with pytest.raises(ConfigError) as caught:
+        resolve_albums(store, ["Famly 2026"])
+
+    assert "Famly 2026" in str(caught.value)
+    assert "Indexed albums: Family 2026" in str(caught.value)
+
+
+def test_a_person_and_an_album_are_resolved_the_same_way(store: Store) -> None:
+    """Both go through one resolver, so an empty index says so instead of matching nothing."""
+    with pytest.raises(ConfigError, match="Indexed people: none yet"):
+        resolve_people(store, ["Anna"])
+    with pytest.raises(ConfigError, match="Indexed albums: none yet"):
+        resolve_albums(store, ["Family 2026"])

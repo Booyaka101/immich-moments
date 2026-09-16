@@ -47,6 +47,7 @@ class IndexReport:
     unavailable: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
     people_refs: int = 0
+    albums: int = 0
     faces_rematched: int = 0
     pruned: list[str] = field(default_factory=list)
     timings: list[PhaseTiming] = field(default_factory=list)
@@ -119,6 +120,20 @@ class Indexer:
         if gone:
             _prune_thumbnails(self.config, self.store)
         return len(seen), [row["original_file_name"] for row in gone]
+
+    def refresh_albums(self) -> int:
+        """Album membership as Immich has it now. Returns the albums holding an indexed video.
+
+        One request per album, which is the only way to learn that a video left one. Immich
+        gives no endpoint that hands back every album's contents at once.
+        """
+        memberships = [
+            (asset_id, album["id"], name)
+            for album in self.immich.albums()
+            if (name := (album.get("albumName") or "").strip())
+            for asset_id in self.immich.album_video_ids(album["id"])
+        ]
+        return self.store.replace_albums(memberships)
 
     def refresh_people(self) -> tuple[int, int]:
         """(people with a reference, faces whose name changed as a result)."""
@@ -291,6 +306,11 @@ def run_index(
     report.discovered, report.pruned = indexer.discover(since, limit, prune=prune)
     report.timing("discover").seconds = time.monotonic() - started
     report.timing("discover").assets = report.discovered
+
+    started = time.monotonic()
+    report.albums = indexer.refresh_albums()
+    report.timing("albums").seconds = time.monotonic() - started
+    report.timing("albums").assets = report.albums
 
     if "visual" in phases:
         started = time.monotonic()

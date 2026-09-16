@@ -35,9 +35,10 @@ http://localhost:2283/photos/d625e56a-0254-4d24-ac08-d3cf2d297931
 ```
 
 Each hit is a scene, not a file: a timestamp you can scrub to, the people in it, and the line
-that was spoken there. `--person Martin` narrows any search to the scenes he is in, and
-`--since 2019-07-01 --until 2019-07-31` narrows it to the videos filmed that month. Either one
-on its own lists those scenes newest first, if you have no words to search for. `serve` puts
+that was spoken there. `--person Martin` narrows any search to the scenes he is in,
+`--album "Mothers Day 2026"` to the videos in one Immich album, and
+`--since 2019-07-01 --until 2019-07-31` to the videos filmed that month. Any of them on its
+own lists those scenes newest first, if you have no words to search for. `serve` puts
 the same thing in a browser with thumbnails, and every result links back to the asset in
 Immich.
 
@@ -141,6 +142,7 @@ speech 1/16  umbra-short.mp4
 speech 16/16  day12-film.mp4
 discovered               16
 people references        8
+albums                   2
 videos indexed (visual)  16
 videos indexed (speech)  16
 scenes                   210
@@ -152,9 +154,10 @@ no speech found          5
 │ phase    │ assets │ seconds │ per asset │
 ├──────────┼────────┼─────────┼───────────┤
 │ discover │     16 │     0.0 │      0.0s │
+│ albums   │      2 │     0.1 │      0.0s │
 │ people   │      8 │     1.8 │      0.2s │
-│ visual   │     16 │   500.5 │     31.3s │
-│ speech   │     16 │    20.8 │      1.3s │
+│ visual   │     16 │   491.2 │     30.7s │
+│ speech   │     16 │    22.0 │      1.4s │
 └──────────┴────────┴─────────┴───────────┘
 ```
 
@@ -175,6 +178,7 @@ $ immich-moments index --prune
 clip=ViT-B-32__openai (512-dim)  faces=buffalo_l  data=D:\tmp\moments-data
 discovered                 15
 people references          8
+albums                     2
 videos indexed (visual)    0
 videos indexed (speech)    0
 scenes                     0
@@ -184,8 +188,9 @@ dropped, gone from Immich  rotated_phone_clip.mp4
 ┌──────────┬────────┬─────────┬───────────┐
 │ phase    │ assets │ seconds │ per asset │
 ├──────────┼────────┼─────────┼───────────┤
-│ discover │     15 │     0.1 │      0.0s │
-│ people   │      8 │     1.9 │      0.2s │
+│ discover │     15 │     0.0 │      0.0s │
+│ albums   │      2 │     0.1 │      0.0s │
+│ people   │      8 │     1.8 │      0.2s │
 │ visual   │      0 │     0.0 │         - │
 └──────────┴────────┴─────────┴───────────┘
 ```
@@ -200,6 +205,7 @@ $ immich-moments index
 clip=ViT-B-32__openai (512-dim)  faces=buffalo_l  data=D:\tmp\moments-data
 discovered                   0
 people references            8
+albums                       2
 faces renamed or re-matched  8
 videos indexed (visual)      0
 videos indexed (speech)      0
@@ -209,8 +215,9 @@ transcript segments          0
 ┌──────────┬────────┬─────────┬───────────┐
 │ phase    │ assets │ seconds │ per asset │
 ├──────────┼────────┼─────────┼───────────┤
-│ discover │      0 │     0.1 │         - │
-│ people   │      8 │     1.9 │      0.2s │
+│ discover │      0 │     0.0 │         - │
+│ albums   │      2 │     0.1 │      0.1s │
+│ people   │      8 │     1.7 │      0.2s │
 │ visual   │      0 │     0.0 │         - │
 └──────────┴────────┴─────────┴───────────┘
 
@@ -320,6 +327,32 @@ A name that no indexed scene carries is an error naming the people that are inde
 a typo otherwise looks exactly like a person who happens to be in no video. The web API answers
 the same sentence with a 400, and whatever case you type is resolved to the spelling the index
 uses before it reaches the filter.
+
+`--album` narrows a search to the videos in an Immich album. Membership is per video rather
+than per scene, and every run reads it back, so a video you move between albums follows on the
+next `index`. It is repeatable too, and two albums mean a video that is in both.
+
+```
+$ immich-moments search "a train moving through the dark" --album "Mothers Day 2026" --limit 3
+               3 scene(s) for 'a train moving through the dark' in Mothers Day 2026                
+┌───────┬───────┬─────────────────────┬─────────────────┬────────┬────────────────────────────────┐
+│ score │    at │ video               │ scene           │ people │ said                           │
+├───────┼───────┼─────────────────────┼─────────────────┼────────┼────────────────────────────────┤
+│ 0.971 │ 00:04 │ mothersday-ep11.mp4 │ a train passing │ -      │ You're the first person I've   │
+│       │       │                     │                 │        │ seen on this train…            │
+│ 0.650 │ 00:46 │ mothersday-ep11.mp4 │ a train passing │ -      │                                │
+│ 0.650 │ 01:08 │ mothersday-ep11.mp4 │ a train passing │ -      │                                │
+└───────┴───────┴─────────────────────┴─────────────────┴────────┴────────────────────────────────┘
+http://localhost:2283/photos/d625e56a-0254-4d24-ac08-d3cf2d297931
+```
+
+Albums that hold no video never reach the index, so they are not on offer and an album name
+the index does not know is the same error the person filter gives:
+
+```
+$ immich-moments search "a train" --album "Holiday 2019"
+error: no indexed video is in Holiday 2019. Indexed albums: Mothers Day 2026, Night shoots
+```
 
 `--like SCENE_ID` drops the query and ranks by picture alone against one scene you already
 found, which is how you get the rest of a moment the words never mention. Scene ids come from
@@ -450,10 +483,11 @@ immich-moments on http://127.0.0.1:8099
 
 One page, one search box, a slider for the blend, thumbnails, and a link into Immich for every
 scene. The `who` menu lists the people the index knows and how many scenes each is in, and the
-name under any result filters on that person when you click it. The two date boxes bound the
-range the videos were filmed in. "more like this" on a card ranks
-the whole index against that scene's picture. The query, the filters and the scene being ranked
-against all live in the URL, so a search is a link you can keep.
+name under any result filters on that person when you click it. The `album` menu next to it
+does the same for Immich albums, with the videos each one holds. The two date boxes bound the
+range the videos were filmed in. "more like this" on a card ranks the whole index against that
+scene's picture. The query, the filters and the scene being ranked against all live in the URL,
+so a search is a link you can keep.
 
 ### write it back into Immich
 

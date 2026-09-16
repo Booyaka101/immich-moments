@@ -70,34 +70,41 @@ def ml_transport() -> httpx.MockTransport:
 
 
 def immich_transport(
-    video: Path, *, missing: bool = False, people: tuple[dict, ...] = ()
+    video: Path,
+    *,
+    missing: bool = False,
+    people: tuple[dict, ...] = (),
+    albums: tuple[tuple[str, list[str]], ...] = (),
 ) -> httpx.MockTransport:
+    """`albums` is (name, asset ids); membership comes back through the video search."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if path.endswith("/albums"):
+            return httpx.Response(
+                200, json=[{"id": f"al{n}", "albumName": name} for n, (name, _) in enumerate(albums)]
+            )
         if path.endswith("/thumbnail"):
             return httpx.Response(200, content=PORTRAIT, headers={"content-type": "image/jpeg"})
         if path.endswith("/search/metadata"):
-            page = int(json.loads(request.content).get("page", 1))
-            if page > 1:
+            body = json.loads(request.content)
+            wanted = body.get("albumIds") or []
+            items = [
+                {
+                    "id": ASSET_ID,
+                    "originalFileName": "colour-cards.mp4",
+                    "type": "VIDEO",
+                    "duration": 18000,
+                    "fileCreatedAt": "2026-06-01T12:00:00.000Z",
+                    "updatedAt": "2026-06-01T12:00:00.000Z",
+                }
+            ]
+            if wanted:
+                members = albums[int(wanted[0].removeprefix("al"))][1]
+                items = [item for item in items if item["id"] in members]
+            if int(body.get("page", 1)) > 1 or not items:
                 return httpx.Response(200, json={"assets": {"items": [], "nextPage": None}})
-            return httpx.Response(
-                200,
-                json={
-                    "assets": {
-                        "items": [
-                            {
-                                "id": ASSET_ID,
-                                "originalFileName": "colour-cards.mp4",
-                                "type": "VIDEO",
-                                "duration": 18000,
-                                "fileCreatedAt": "2026-06-01T12:00:00.000Z",
-                                "updatedAt": "2026-06-01T12:00:00.000Z",
-                            }
-                        ],
-                        "nextPage": 2,
-                    }
-                },
-            )
+            return httpx.Response(200, json={"assets": {"items": items, "nextPage": 2}})
         if path.endswith("/people"):
             return httpx.Response(200, json={"people": list(people), "hasNextPage": False})
         if path.endswith("/original"):
@@ -124,11 +131,14 @@ def index(
     *,
     missing: bool = False,
     people: tuple[dict, ...] = (),
+    albums: tuple[tuple[str, list[str]], ...] = (),
     prune: bool = False,
 ):
     store.check_model("test-clip", DIM, reindex=False)
     with (
-        ImmichClient(config, transport=immich_transport(video, missing=missing, people=people)) as immich,
+        ImmichClient(
+            config, transport=immich_transport(video, missing=missing, people=people, albums=albums)
+        ) as immich,
         MLClient(config, "test-clip", "test-faces", transport=ml_transport()) as ml,
     ):
         return run_index(
@@ -384,6 +394,8 @@ def catalogue(count: int) -> httpx.MockTransport:
     """A library of `count` videos on one page, for the discovery checkpoint tests."""
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/albums"):
+            return httpx.Response(200, json=[])
         items = [
             {
                 "id": f"{ASSET_ID[:-1]}{n}",
@@ -460,3 +472,19 @@ def test_prune_refuses_a_partial_walk(config: Config, store: Store) -> None:
         with pytest.raises(ConfigError, match="whole library"):
             indexer.discover("2026-01-01T00:00:00Z", prune=True)
     assert store.counts()["assets"] == 0
+
+
+def test_album_membership_is_read_back_on_every_run(
+    config: Config, store: Store, colour_video: Path, labels_file: Path
+) -> None:
+    """An album Immich holds no video in is not an album this index can filter by."""
+    report = index(
+        config,
+        store,
+        colour_video,
+        labels_file,
+        albums=(("Family 2026", [ASSET_ID]), ("Photos only", []), ("", [ASSET_ID])),
+    )
+
+    assert report.albums == 1
+    assert [(row["name"], row["videos"]) for row in store.albums_in_index()] == [("Family 2026", 1)]

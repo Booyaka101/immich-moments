@@ -28,11 +28,12 @@ class Filters:
 
     asset_id: str | None = None
     people: tuple[str, ...] = ()
+    albums: tuple[str, ...] = ()
     since: str | None = None
     until: str | None = None
 
     def __bool__(self) -> bool:
-        return bool(self.asset_id or self.people or self.since or self.until)
+        return bool(self.asset_id or self.people or self.albums or self.since or self.until)
 
     def sql(self, asset_column: str, scene_column: str) -> tuple[str, list]:
         """Extra AND clauses for a query that can reach both columns, and their parameters."""
@@ -47,6 +48,12 @@ class Filters:
                 f"{scene_column} IN (SELECT scene_id FROM scene_faces WHERE lower(person_name) = ?)"  # noqa: S608
             )
             params.append(name.strip().lower())
+        # Membership is per video, so two albums mean a video that is in both of them.
+        for album in self.albums:
+            clauses.append(
+                f"{asset_column} IN (SELECT asset_id FROM asset_albums WHERE lower(album_name) = ?)"  # noqa: S608
+            )
+            params.append(album.strip().lower())
         # Immich stores the capture time, so compare the date part and leave the clock out of it.
         for bound, comparison in ((self.since, ">="), (self.until, "<=")):
             if bound:
@@ -58,19 +65,28 @@ class Filters:
         return "".join(f" AND {clause}" for clause in clauses), params
 
 
-def resolve_people(store: Store, wanted: Iterable[str]) -> list[str]:
+def _resolve(wanted: Iterable[str], known: dict[str, str], *, missing: str, have: str) -> list[str]:
     """Names as the index spells them, so a typo is an error instead of an empty result.
 
     SQLite's lower() is ASCII only, which is the other reason not to send a typed name straight
     into the filter.
     """
-    known = {row["name"].lower(): row["name"] for row in store.people_in_index()}
     cleaned = [name.strip() for name in wanted if name.strip()]
-    missing = [name for name in cleaned if name.lower() not in known]
-    if missing:
-        have = ", ".join(sorted(known.values())) or "nobody yet"
-        raise ConfigError(f"no indexed scenes name {', '.join(missing)}. Indexed people: {have}")
+    absent = [name for name in cleaned if name.lower() not in known]
+    if absent:
+        listed = ", ".join(sorted(known.values())) or "none yet"
+        raise ConfigError(f"{missing.format(', '.join(absent))}. {have}: {listed}")
     return [known[name.lower()] for name in cleaned]
+
+
+def resolve_people(store: Store, wanted: Iterable[str]) -> list[str]:
+    known = {row["name"].lower(): row["name"] for row in store.people_in_index()}
+    return _resolve(wanted, known, missing="no indexed scenes name {}", have="Indexed people")
+
+
+def resolve_albums(store: Store, wanted: Iterable[str]) -> list[str]:
+    known = {row["name"].lower(): row["name"] for row in store.albums_in_index()}
+    return _resolve(wanted, known, missing="no indexed video is in {}", have="Indexed albums")
 
 
 def date_range(since: str | None, until: str | None) -> tuple[str | None, str | None]:

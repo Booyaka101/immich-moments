@@ -40,8 +40,9 @@ footage, 8 named people.
 | `--prune` | trashed a video in Immich, `index --prune` dropped it by name, its scene left the search and its thumbnail left the disk (209 of 210). Restoring it and re-indexing put all 210 back |
 | `--prune --limit` | refused, exit 2, before any request is sent |
 | `doctor` on a failed video | lists it by name with the ffmpeg error, and still exits 0 |
+| `--album` and the album menu | made two albums in Immich over 6 and 2 of the 16 videos, one `index` run picked both up in 0.1s, `search --album "Night shoots"` returned only that album's scenes, and the UI round-trips `?q=...&album=Night+shoots` |
 
-Test suite: 262 passed, including the two slow tests that really run Whisper. The fast subset
+Test suite: 280 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Known limits, written down rather than hidden
@@ -111,6 +112,10 @@ them was believed.
 - `--write-back` skips trashed videos instead of dying on the first 404.
 - `doctor` lists what the last run could not index and why, reading the status the index
   already kept. The speech pass now records a failure the way the visual pass always did.
+- `search --album NAME` and the album menu in the UI. Membership lives in its own table and is
+  replaced wholesale on every run, since Immich never says that a video left an album. The
+  album detail call stopped embedding its assets in Immich 3.2, so membership comes back
+  through the same paged video search the walk already uses: one request per album.
 - `relabel`, which re-scores the stored vectors against a new vocabulary. On the 16-video
   index the default vocabulary changes nothing, which is the check that the labels on disk
   still match the vectors they came from. A real run against a copy moved 209 of 210 scenes
@@ -147,27 +152,24 @@ with a test each, and every assertion the TESTS paragraph asks for.
 
 Built in this round, because each was a small diff against something that already existed:
 the person filter, `--json`, `--like`, `relabel`, the `--since` / `--until` range, `--prune`,
-the face re-match, and the `doctor` list of what failed. The range in particular is one more clause on the `Filters` object, so
-it narrows the vectors, the transcript and "more like this" without any of them knowing that
-dates exist.
+the face re-match, the `doctor` list of what failed, and the album filter. The range and the
+album are each one more clause on the same `Filters` object, so they narrow the vectors, the
+transcript and "more like this" without any of them knowing that dates or albums exist.
 
 Left out, with the reason, in the order I would build them next.
 
-1. Album filters. The index carries people because the faces were already being fetched; it
-   carries no album membership. One `GET /api/albums` plus one call per album at discovery
-   time would fix that, and it is the filter people will ask for after dates.
-2. A relevance test set. Twenty hand-judged queries would turn the blend weight from a
+1. A relevance test set. Twenty hand-judged queries would turn the blend weight from a
    defensible number into a measured one. Nothing else here is guesswork, and this is.
-3. OCR over the scene frame, for title cards and signs. Same `/predict` plumbing, but it is a
+2. OCR over the scene frame, for title cards and signs. Same `/predict` plumbing, but it is a
    second model the user has to have pulled.
-4. Speaker diarisation, so a description could say who said a line. pyannote needs a Hugging
+3. Speaker diarisation, so a description could say who said a line. pyannote needs a Hugging
    Face token and a licence click, which conflicts with shipping no weights.
-5. A deep link into Immich at a timestamp. Immich has no such URL today, so the link opens the
+4. A deep link into Immich at a timestamp. Immich has no such URL today, so the link opens the
    asset and the timestamp is printed beside it.
-6. A score floor. A query nothing matches still prints the library's best guess. The score
+5. A score floor. A query nothing matches still prints the library's best guess. The score
    column says so, and a badly chosen floor would hide the speech-led hits that land near
    0.35.
-7. A retry budget. A file that fails every time is downloaded again on every run. Counting the
+6. A retry budget. A file that fails every time is downloaded again on every run. Counting the
    attempts and backing off needs a column and a flag to force a retry anyway, and getting the
    backoff wrong would hide a video that a fixed ML container would now index.
 

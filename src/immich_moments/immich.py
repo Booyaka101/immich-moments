@@ -161,7 +161,9 @@ class ImmichClient:
 
     # ---- assets ----------------------------------------------------------
 
-    def iter_videos(self, *, updated_after: str | None = None) -> Iterator[dict[str, Any]]:
+    def iter_videos(
+        self, *, updated_after: str | None = None, album_id: str | None = None
+    ) -> Iterator[dict[str, Any]]:
         """Page through every video asset, newest first.
 
         Immich deprecated the flat search fields in v3.2.0 in favour of a structured `filter`
@@ -174,7 +176,8 @@ class ImmichClient:
         while True:
             try:
                 body = self.post_json(
-                    "/search/metadata", _search_body(structured, page, cursor, updated_after)
+                    "/search/metadata",
+                    _search_body(structured, page, cursor, updated_after, album_id),
                 )
             except ImmichError as exc:
                 if structured or exc.status != 400:
@@ -285,6 +288,22 @@ class ImmichClient:
                 return collected
             page += 1
 
+    # ---- albums ----------------------------------------------------------
+
+    def albums(self) -> list[dict[str, Any]]:
+        body = self.get_json("/albums")
+        if not isinstance(body, list):
+            raise ImmichError("GET /api/albums did not return a list")
+        return body
+
+    def album_video_ids(self, album_id: str) -> list[str]:
+        """The videos in one album.
+
+        `GET /albums/<id>` used to embed the member assets and stopped on v3.2, so this goes
+        through the same paged video search the walk uses.
+        """
+        return [asset["id"] for asset in self.iter_videos(album_id=album_id) if asset.get("id")]
+
     def asset_thumbnail(self, asset_id: str, size: str = "preview") -> bytes | None:
         """A real still from the library, used by `doctor` to round-trip the ML container."""
         return self._thumbnail(f"/assets/{asset_id}/thumbnail", params={"size": size})
@@ -322,13 +341,19 @@ class ImmichClient:
 
 
 def _search_body(
-    structured: bool, page: int, cursor: str | None, updated_after: str | None
+    structured: bool,
+    page: int,
+    cursor: str | None,
+    updated_after: str | None,
+    album_id: str | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {"withExif": False, "size": PAGE_SIZE}
     if structured:
         filters: dict[str, Any] = {"type": {"eq": "VIDEO"}}
         if updated_after:
             filters["updatedAt"] = {"gt": updated_after}
+        if album_id:
+            filters["albumIds"] = {"any": [album_id]}
         body["filter"] = filters
         if cursor:
             body["cursor"] = cursor
@@ -337,6 +362,8 @@ def _search_body(
     body["page"] = page
     if updated_after:
         body["updatedAfter"] = updated_after
+    if album_id:
+        body["albumIds"] = [album_id]
     return body
 
 

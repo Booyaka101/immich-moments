@@ -249,3 +249,26 @@ def test_the_tags_an_asset_already_carries_are_read_back(config: Config) -> None
     }
     with client(config, lambda _r: httpx.Response(200, json=body)) as immich:
         assert immich.asset_annotations("a1").tags == {"moments/people/Anna"}
+
+
+@pytest.mark.parametrize("flat_fields_work", [True, False])
+def test_album_members_are_asked_for_in_whichever_shape_the_server_takes(
+    config: Config, flat_fields_work: bool
+) -> None:
+    """v3.2 stopped embedding assets in the album detail, so membership is a filtered search."""
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append(body)
+        if "filter" not in body and not flat_fields_work:
+            return json_response({"message": ["property albumIds should not exist"]}, status=400)
+        return json_response(RECORDED["search_page"])
+
+    with client(config, handler) as immich:
+        assert len(immich.album_video_ids("al1")) == 2
+
+    if flat_fields_work:
+        assert seen[-1]["albumIds"] == ["al1"]
+    else:
+        assert seen[-1]["filter"]["albumIds"] == {"any": ["al1"]}

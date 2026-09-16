@@ -316,7 +316,7 @@ def test_an_index_from_schema_one_gains_the_embedding_column(config: Config) -> 
     with Store(config) as store:
         columns = {row["name"] for row in store.db.execute("PRAGMA table_info(scene_faces)")}
         assert "embedding" in columns
-        assert store.get_state("schema_version") == "2"
+        assert store.get_state("schema_version") == "3"
 
 
 def test_pruning_drops_the_asset_with_everything_hanging_off_it(store: Store, config: Config) -> None:
@@ -406,3 +406,26 @@ def test_a_transcript_clears_the_failure_that_came_before_it(store: Store) -> No
 
     assert store.problem_assets() == []
     assert store.asset("a1")["error"] is None
+
+
+def test_album_membership_is_replaced_not_merged(store: Store) -> None:
+    """A video can leave an album at any time, and Immich never says so."""
+    seed_asset(store)
+    seed_asset(store, "a2")
+    store.replace_albums([("a1", "al1", "Holiday"), ("a2", "al1", "Holiday")])
+
+    assert store.replace_albums([("a1", "al1", "Holiday"), ("a1", "al2", "Birthdays")]) == 2
+
+    assert [(row["name"], row["videos"]) for row in store.albums_in_index()] == [
+        ("Birthdays", 1),
+        ("Holiday", 1),
+    ]
+
+
+def test_albums_ignore_assets_the_index_has_never_seen(store: Store) -> None:
+    """Immich albums hold photos and videos this run never walked; neither is searchable here."""
+    seed_asset(store)
+
+    assert store.replace_albums([("a1", "al1", "Holiday"), ("photo9", "al2", "Wallpapers")]) == 1
+
+    assert [row["name"] for row in store.albums_in_index()] == ["Holiday"]

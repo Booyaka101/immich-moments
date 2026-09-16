@@ -22,7 +22,7 @@ from .immich import ImmichClient
 from .indexer import run_index
 from .labels import build_label_index
 from .ml import MLClient
-from .search import Filters, Hit, date_range, resolve_people
+from .search import Filters, Hit, date_range, resolve_albums, resolve_people
 from .search import search as run_search
 from .search import similar as run_similar
 from .store import Store
@@ -332,6 +332,10 @@ def search(
         list[str] | None,
         typer.Option("--person", "-p", help="Only scenes this person appears in. Repeatable."),
     ] = None,
+    album: Annotated[
+        list[str] | None,
+        typer.Option("--album", "-a", help="Only videos in this Immich album. Repeatable."),
+    ] = None,
     like: Annotated[
         int | None,
         typer.Option("--like", help="Scene id to find more of, instead of a query."),
@@ -350,15 +354,17 @@ def search(
 ) -> None:
     """Search the index and print the matching scenes with timestamps.
 
-    With --person, --asset or a date range and no query, it lists those scenes newest video
-    first. With --like it ranks by picture alone against the scene you name.
+    With --person, --album, --asset or a date range and no query, it lists those scenes
+    newest video first. With --like it ranks by picture alone against the scene you name.
     """
     config = _setup(config_path, verbose)
     wanted = [name.strip() for name in (person or []) if name.strip()]
+    in_albums = [name.strip() for name in (album or []) if name.strip()]
     first, last = date_range(since, until)
+    nothing_asked = not any((query.strip(), wanted, in_albums, asset, first, last))
     if like is not None and query.strip():
         raise ConfigError("--like ranks against one scene's picture, so it takes no query.")
-    if like is None and not query.strip() and not wanted and not asset and not (first or last):
+    if like is None and nothing_asked:
         raise ConfigError("give me something to search for, or --person NAME to browse.")
 
     immich, ml, clip_model, _face = _clients(config)
@@ -366,7 +372,14 @@ def search(
     with immich, ml, Store(config) as store:
         store.assert_model(clip_model)
         people = resolve_people(store, wanted)
-        filters = Filters(asset_id=asset, people=tuple(people), since=first, until=last)
+        albums = resolve_albums(store, in_albums)
+        filters = Filters(
+            asset_id=asset,
+            people=tuple(people),
+            albums=tuple(albums),
+            since=first,
+            until=last,
+        )
         if like is not None:
             reference, hits = run_similar(store, like, limit=limit, filters=filters)
         else:
@@ -421,6 +434,8 @@ def _describe(query: str, filters: Filters, reference: Hit | None = None) -> str
         parts.append(f"like {what} in {reference.original_file_name}")
     if filters.people:
         parts.append("with " + " and ".join(filters.people))
+    if filters.albums:
+        parts.append("in " + " and ".join(filters.albums))
     if filters.since:
         parts.append(f"since {filters.since}")
     if filters.until:
@@ -507,6 +522,8 @@ def _print_report(report) -> None:
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_row("discovered", str(report.discovered))
     table.add_row("people references", str(report.people_refs))
+    if report.albums:
+        table.add_row("albums", str(report.albums))
     if report.faces_rematched:
         table.add_row("faces renamed or re-matched", str(report.faces_rematched))
     table.add_row("videos indexed (visual)", str(report.visual_indexed))

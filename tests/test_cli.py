@@ -165,7 +165,7 @@ def test_a_person_nobody_is_indexed_under_is_not_silently_empty(
     captured = capsys.readouterr()
     assert code == ConfigError.exit_code
     assert "Ana" in captured.err
-    assert "nobody yet" in captured.err
+    assert "none yet" in captured.err
 
 
 def capture_filters(monkeypatch: pytest.MonkeyPatch) -> dict:
@@ -278,7 +278,7 @@ def test_json_output_is_machine_readable(monkeypatch: pytest.MonkeyPatch, capsys
     assert payload[0]["immich_url"] == "http://immich.test/photos/a1"
 
 
-def seed_index(data_dir, labels, person: str | None = None) -> None:
+def seed_index(data_dir, labels, person: str | None = None, album: str | None = None) -> None:
     """A two-scene index on disk, so `relabel` has real vectors to read back."""
     config = Config(
         immich_url="http://immich.test",
@@ -313,6 +313,8 @@ def seed_index(data_dir, labels, person: str | None = None) -> None:
             store.vectors(8),
             indexed_at="2026-06-01T00:00:00Z",
         )
+        if album:
+            store.replace_albums([("a1", "al1", album)])
 
 
 def stub_labels(monkeypatch: pytest.MonkeyPatch, *, wins: str) -> None:
@@ -379,3 +381,32 @@ def test_prune_with_a_partial_walk_is_refused_before_anything_connects(
     captured = capsys.readouterr()
     assert code == ConfigError.exit_code
     assert "whole library" in captured.err
+
+
+def test_an_album_is_filtered_by_the_spelling_the_index_uses(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
+) -> None:
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden"], album="Föhr 2026")
+    seen = capture_filters(monkeypatch)
+
+    code, _ = run("search", "--album", "föhr 2026", monkeypatch=monkeypatch)
+
+    assert code == 1  # no hits, because the stub returns none
+    assert seen["filters"].albums == ("Föhr 2026",)
+    assert "in Föhr 2026" in capsys.readouterr().out
+
+
+def test_an_album_the_index_has_never_seen_is_not_silently_empty(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
+) -> None:
+    """Immich albums holding only photos never reach the index, and neither does a typo."""
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden"], album="Föhr 2026")
+
+    code, _ = run("search", "--album", "Holiday", monkeypatch=monkeypatch)
+
+    captured = capsys.readouterr()
+    assert code == ConfigError.exit_code
+    assert "Holiday" in captured.err
+    assert "Indexed albums: Föhr 2026" in captured.err

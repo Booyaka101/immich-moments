@@ -14,7 +14,7 @@ import numpy as np
 from .config import Config
 from .errors import DimensionMismatch, MomentsError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS scene_faces (
     embedding   BLOB
 );
 CREATE INDEX IF NOT EXISTS scene_faces_scene ON scene_faces(scene_id);
+
+CREATE TABLE IF NOT EXISTS asset_albums (
+    asset_id   TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    album_id   TEXT NOT NULL,
+    album_name TEXT NOT NULL,
+    PRIMARY KEY (asset_id, album_id)
+);
+CREATE INDEX IF NOT EXISTS asset_albums_name ON asset_albums(album_name);
 
 CREATE TABLE IF NOT EXISTS people_refs (
     person_id  TEXT PRIMARY KEY,
@@ -481,6 +489,28 @@ class Store:
             "(SELECT name FROM people_refs WHERE people_refs.person_id = scene_faces.person_id)"
         )
         return cursor.rowcount
+
+    def replace_albums(self, memberships: Sequence[tuple[str, str, str]]) -> int:
+        """Swap in album membership as Immich has it now. Returns the albums that hold a video.
+
+        Albums are cheap to re-read and a video can leave one at any time, so this replaces
+        rather than merges. Rows for assets the index has never seen are dropped on the way in.
+        """
+        with self.transaction() as db:
+            db.execute("DELETE FROM asset_albums")
+            db.executemany(
+                "INSERT OR IGNORE INTO asset_albums (asset_id, album_id, album_name) "
+                "SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM assets WHERE id = ?)",
+                [(asset_id, album_id, name, asset_id) for asset_id, album_id, name in memberships],
+            )
+        return int(self.db.execute("SELECT COUNT(DISTINCT album_id) AS n FROM asset_albums").fetchone()["n"])
+
+    def albums_in_index(self) -> list[sqlite3.Row]:
+        """Albums holding at least one indexed video, with how many each holds."""
+        return self.db.execute(
+            "SELECT album_name AS name, COUNT(DISTINCT asset_id) AS videos FROM asset_albums "
+            "GROUP BY album_name ORDER BY videos DESC, album_name"
+        ).fetchall()
 
     def people_in_index(self) -> list[sqlite3.Row]:
         """Named people who actually appear in a scene, with how many scenes each is in."""

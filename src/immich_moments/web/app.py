@@ -18,7 +18,7 @@ from ..config import Config
 from ..errors import ConfigError, MomentsError
 from ..immich import ImmichClient
 from ..ml import MLClient
-from ..search import Filters, date_range, resolve_people
+from ..search import Filters, date_range, resolve_albums, resolve_people
 from ..search import search as run_search
 from ..search import similar as run_similar
 from ..store import Store
@@ -83,6 +83,12 @@ def create_app(
             rows = await run_in_threadpool(request.app.state.store.people_in_index)
         return {"people": [{"name": row["name"], "scenes": row["scenes"]} for row in rows]}
 
+    @app.get("/api/albums")
+    async def albums(request: Request):
+        async with request.app.state.searching:
+            rows = await run_in_threadpool(request.app.state.store.albums_in_index)
+        return {"albums": [{"name": row["name"], "videos": row["videos"]} for row in rows]}
+
     @app.get("/api/search")
     async def search(
         request: Request,
@@ -91,6 +97,7 @@ def create_app(
         weight: float | None = Query(None, ge=0.0, le=1.0),
         asset: str | None = Query(None),
         person: list[str] = Query([], description="Only scenes this person appears in."),
+        album: list[str] = Query([], description="Only videos in this Immich album."),
         like: int | None = Query(None, description="Scene id to find more of, instead of a query."),
         since: str | None = Query(None, description="Only videos taken on or after this day."),
         until: str | None = Query(None, description="Only videos taken on or before this day."),
@@ -102,7 +109,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if like is not None and q.strip():
             raise HTTPException(status_code=400, detail="like ranks against one scene, so it takes no query")
-        if like is None and not q.strip() and not person and not asset and not (first or last):
+        if like is None and not any((q.strip(), person, album, asset, first, last)):
             raise HTTPException(status_code=400, detail="give me a query, or a person to browse")
         # A search is an HTTP call to the ML container and then SQLite, both blocking. On the event
         # loop it would freeze the page and every thumbnail behind one query.
@@ -110,7 +117,14 @@ def create_app(
         async with state.searching:
             try:
                 people = await run_in_threadpool(resolve_people, state.store, person)
-                filters = Filters(asset_id=asset, people=tuple(people), since=first, until=last)
+                in_albums = await run_in_threadpool(resolve_albums, state.store, album)
+                filters = Filters(
+                    asset_id=asset,
+                    people=tuple(people),
+                    albums=tuple(in_albums),
+                    since=first,
+                    until=last,
+                )
                 if like is not None:
                     reference, hits = await run_in_threadpool(
                         run_similar, state.store, like, limit=limit, filters=filters
@@ -130,6 +144,7 @@ def create_app(
         return {
             "query": q,
             "people": people,
+            "albums": in_albums,
             "since": first,
             "until": last,
             "like": reference.as_dict(config.immich_url) if reference else None,

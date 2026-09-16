@@ -3,6 +3,7 @@ const box = document.getElementById("q");
 const weight = document.getElementById("weight");
 const weightValue = document.getElementById("weight-value");
 const people = document.getElementById("people");
+const albums = document.getElementById("albums");
 const since = document.getElementById("since");
 const until = document.getElementById("until");
 const filters = document.getElementById("filters");
@@ -10,6 +11,7 @@ const results = document.getElementById("results");
 const hint = document.getElementById("hint");
 const button = form.querySelector("button");
 
+// Every chip is {kind, name}, where kind is the query parameter it becomes: person or album.
 const active = [];
 let like = null;
 let reference = null;
@@ -27,10 +29,12 @@ form.addEventListener("submit", (event) => {
   if (anything()) run();
 });
 
-people.addEventListener("change", () => {
-  addPerson(people.value);
-  people.value = "";
-});
+for (const [menu, kind] of [[people, "person"], [albums, "album"]]) {
+  menu.addEventListener("change", () => {
+    addFilter(kind, menu.value);
+    menu.value = "";
+  });
+}
 
 for (const input of [since, until]) {
   input.addEventListener("change", rerunOrClear);
@@ -38,7 +42,8 @@ for (const input of [since, until]) {
 
 window.addEventListener("popstate", () => readUrl(false));
 
-loadPeople();
+loadMenu(people, "/api/people", (data) => data.people.map((p) => ({ name: p.name, count: p.scenes })));
+loadMenu(albums, "/api/albums", (data) => data.albums.map((a) => ({ name: a.name, count: a.videos })));
 readUrl(false);
 
 function anything() {
@@ -53,20 +58,22 @@ function readUrl(push) {
   until.value = params.get("until") || "";
   reference = null;
   active.length = 0;
-  active.push(...params.getAll("person"));
+  for (const kind of ["person", "album"]) {
+    for (const name of params.getAll(kind)) active.push({ kind, name });
+  }
   drawFilters();
   if (anything()) run(push);
 }
 
-function addPerson(name) {
-  if (!name || active.includes(name)) return;
-  active.push(name);
+function addFilter(kind, name) {
+  if (!name || active.some((f) => f.kind === kind && f.name === name)) return;
+  active.push({ kind, name });
   drawFilters();
   run();
 }
 
-function removePerson(name) {
-  const at = active.indexOf(name);
+function removeFilter(filter) {
+  const at = active.indexOf(filter);
   if (at < 0) return;
   active.splice(at, 1);
   drawFilters();
@@ -97,19 +104,20 @@ function rerunOrClear() {
   history.pushState({}, "", "/");
 }
 
-async function loadPeople() {
+async function loadMenu(menu, url, entries) {
   try {
-    const response = await fetch("/api/people");
+    const response = await fetch(url);
     const data = await response.json();
-    for (const person of data.people) {
+    const options = entries(data);
+    for (const entry of options) {
       const option = document.createElement("option");
-      option.value = person.name;
-      option.textContent = `${person.name} (${person.scenes})`;
-      people.append(option);
+      option.value = entry.name;
+      option.textContent = `${entry.name} (${entry.count})`;
+      menu.append(option);
     }
-    people.disabled = data.people.length === 0;
+    menu.disabled = options.length === 0;
   } catch {
-    people.disabled = true;
+    menu.disabled = true;
   }
 }
 
@@ -134,8 +142,10 @@ function drawFilters() {
       }),
     );
   }
-  for (const name of active) {
-    filters.append(chip(`${name} ✕`, `Stop filtering on ${name}`, () => removePerson(name)));
+  for (const filter of active) {
+    filters.append(
+      chip(`${filter.name} ✕`, `Stop filtering on ${filter.name}`, () => removeFilter(filter)),
+    );
   }
 }
 
@@ -146,7 +156,7 @@ function searchParams() {
   if (like) params.set("like", String(like));
   if (since.value) params.set("since", since.value);
   if (until.value) params.set("until", until.value);
-  for (const name of active) params.append("person", name);
+  for (const filter of active) params.append(filter.kind, filter.name);
   return params;
 }
 
@@ -176,6 +186,7 @@ function describe(data) {
   if (data.query.trim()) parts.push(`for “${data.query.trim()}”`);
   if (data.like) parts.push(`like “${data.like.label || `scene ${data.like.scene_index}`}” in ${data.like.file_name}`);
   if (data.people.length) parts.push(`with ${data.people.join(" and ")}`);
+  if (data.albums.length) parts.push(`in ${data.albums.join(" and ")}`);
   if (data.since) parts.push(`since ${data.since}`);
   if (data.until) parts.push(`until ${data.until}`);
   return parts.join(" ");
@@ -230,7 +241,7 @@ function card(hit) {
       node.className = "chip";
       node.textContent = person;
       node.title = `Only scenes with ${person}`;
-      node.addEventListener("click", () => addPerson(person));
+      node.addEventListener("click", () => addFilter("person", person));
       chips.append(node);
     }
     body.append(chips);

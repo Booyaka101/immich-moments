@@ -52,6 +52,9 @@ First release.
 - `search --since` and `--until`, and the two date boxes in the UI: bounds the search by the
   day the video was filmed. Inclusive at both ends, and applied before either channel scores
   anything.
+- `search --album NAME`, and the album menu in the UI: narrows the search to the videos in an
+  Immich album. Membership is per video, repeatable, and re-read on every `index` run, so a
+  video that moves between albums follows on the next one.
 - Configuration from environment variables or an `immich-moments.toml`.
 - A Docker image and a compose snippet that sits beside an existing Immich stack.
 

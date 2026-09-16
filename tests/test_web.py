@@ -83,6 +83,7 @@ def seeded(config: Config) -> Config:
             indexed_at=NOW,
             has_audio=True,
         )
+        store.replace_albums([("birthday", "al1", "Family 2026")])
     (config.thumbs_dir / "birthday-1.jpg").write_bytes(b"\xff\xd8\xff\xdbnot really a jpeg\xff\xd9")
     return config
 
@@ -294,3 +295,29 @@ def test_a_day_that_is_not_a_date_is_a_400(client: TestClient) -> None:
     response = client.get("/api/search", params={"q": "candles", "since": "last summer"})
     assert response.status_code == 400
     assert "2019-07-04" in response.json()["detail"]
+
+
+def test_the_albums_endpoint_lists_what_the_index_can_filter_by(client: TestClient) -> None:
+    body = client.get("/api/albums").json()
+    assert body["albums"] == [{"name": "Family 2026", "videos": 1}]
+
+
+def test_an_album_narrows_a_search_and_is_named_back(client: TestClient) -> None:
+    body = client.get("/api/search", params={"q": "candles", "album": "Family 2026"}).json()
+    assert body["albums"] == ["Family 2026"]
+    assert [hit["scene_index"] for hit in body["hits"]] == [1, 0]
+
+    empty = client.get("/api/search", params={"q": "candles", "album": "family 2026", "asset": "nope"})
+    assert empty.json()["hits"] == []
+
+
+def test_an_album_on_its_own_browses_without_a_query(client: TestClient) -> None:
+    body = client.get("/api/search", params={"album": "Family 2026"}).json()
+    assert body["count"] == 2
+    assert body["query"] == ""
+
+
+def test_an_album_the_index_does_not_know_is_a_400(client: TestClient) -> None:
+    response = client.get("/api/search", params={"q": "candles", "album": "Holiday"})
+    assert response.status_code == 400
+    assert "Holiday" in response.json()["detail"]
