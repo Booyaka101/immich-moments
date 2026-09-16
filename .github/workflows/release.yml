@@ -136,11 +136,13 @@ jobs:
             exit 1
           fi
 
-          # A backstop that does not depend on the digests lining up. Measured at 1.0.3: the
-          # CPU image is 432 MB and the CUDA one 1816 MB, so a swap shows up in the size too.
-          size=$(docker image inspect --format '{{.Size}}' "$image:latest")
-          echo "latest is $((size / 1048576)) MB"
-          if [ "$size" -gt 1000000000 ]; then echo "latest is too big to be the CPU build" >&2; exit 1; fi
+          # A backstop that does not depend on the digests lining up. Size is the wrong
+          # measure for it: 1.0.4 is 432 MB in the registry, 1205 MB unpacked here and 1760 MB
+          # unpacked under Docker Desktop, all the same image. What separates the two builds
+          # is the nvidia wheels, so ask each image whether it has them.
+          wheels="import importlib.util; print(importlib.util.find_spec('nvidia') is not None)"
+          test "$(docker run --rm --entrypoint python "$image:latest" -c "$wheels")" = False
+          test "$(docker run --rm --entrypoint python "$image:$version-cuda" -c "$wheels")" = True
 
           # Running the CLI inside the image catches a runtime dependency missing from the
           # image itself, which a test suite running against the source cannot see.
