@@ -165,12 +165,13 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          # PyPI's index lags the upload by a minute or two, so give it a few tries.
+          python -m venv /tmp/fresh
+          # PyPI's index lags the upload by a minute or two, and it is cached per CDN node, so
+          # one request finding the new version does not mean the next one will. 1.1.0 failed
+          # here with a probe in front of the install that had just downloaded the wheel.
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if pip download --no-deps --dest /tmp/dl "immich-moments==$version"; then break; fi
+            if /tmp/fresh/bin/pip install "immich-moments==$version"; then break; fi
             echo "not on the index yet, attempt $attempt"; sleep 30
           done
-          python -m venv /tmp/fresh
-          /tmp/fresh/bin/pip install --quiet "immich-moments==$version"
           test "$(/tmp/fresh/bin/immich-moments --version)" = "$version"
           /tmp/fresh/bin/immich-moments doctor --help > /dev/null
