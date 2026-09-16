@@ -75,7 +75,9 @@ main { padding: 20px 24px 60px; }
 }
 .chip:hover { background: #31404f; }
 .chip.active { background: var(--accent); color: #08101c; font-weight: 600; }
-.knob select {
+.knob select,
+.knob input[type="date"] {
+  width: auto;
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;

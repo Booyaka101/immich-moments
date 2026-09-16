@@ -18,7 +18,7 @@ from ..config import Config
 from ..errors import ConfigError, MomentsError
 from ..immich import ImmichClient
 from ..ml import MLClient
-from ..search import Filters, resolve_people
+from ..search import Filters, date_range, resolve_people
 from ..search import search as run_search
 from ..search import similar as run_similar
 from ..store import Store
@@ -92,11 +92,17 @@ def create_app(
         asset: str | None = Query(None),
         person: list[str] = Query([], description="Only scenes this person appears in."),
         like: int | None = Query(None, description="Scene id to find more of, instead of a query."),
+        since: str | None = Query(None, description="Only videos taken on or after this day."),
+        until: str | None = Query(None, description="Only videos taken on or before this day."),
     ):
         state = request.app.state
+        try:
+            first, last = date_range(since, until)
+        except ConfigError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if like is not None and q.strip():
             raise HTTPException(status_code=400, detail="like ranks against one scene, so it takes no query")
-        if like is None and not q.strip() and not person and not asset:
+        if like is None and not q.strip() and not person and not asset and not (first or last):
             raise HTTPException(status_code=400, detail="give me a query, or a person to browse")
         # A search is an HTTP call to the ML container and then SQLite, both blocking. On the event
         # loop it would freeze the page and every thumbnail behind one query.
@@ -104,7 +110,7 @@ def create_app(
         async with state.searching:
             try:
                 people = await run_in_threadpool(resolve_people, state.store, person)
-                filters = Filters(asset_id=asset, people=tuple(people))
+                filters = Filters(asset_id=asset, people=tuple(people), since=first, until=last)
                 if like is not None:
                     reference, hits = await run_in_threadpool(
                         run_similar, state.store, like, limit=limit, filters=filters
@@ -124,6 +130,8 @@ def create_app(
         return {
             "query": q,
             "people": people,
+            "since": first,
+            "until": last,
             "like": reference.as_dict(config.immich_url) if reference else None,
             "weight": config.visual_weight if weight is None else weight,
             "count": len(hits),

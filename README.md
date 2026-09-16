@@ -35,9 +35,11 @@ http://localhost:2283/photos/d625e56a-0254-4d24-ac08-d3cf2d297931
 ```
 
 Each hit is a scene, not a file: a timestamp you can scrub to, the people in it, and the line
-that was spoken there. `--person Martin` narrows any search to the scenes he is in, or lists
-them newest first if you have no words to search for. `serve` puts the same thing in a browser
-with thumbnails, and every result links back to the asset in Immich.
+that was spoken there. `--person Martin` narrows any search to the scenes he is in, and
+`--since 2019-07-01 --until 2019-07-31` narrows it to the videos filmed that month. Either one
+on its own lists those scenes newest first, if you have no words to search for. `serve` puts
+the same thing in a browser with thumbnails, and every result links back to the asset in
+Immich.
 
 Optionally it writes what it found back into Immich, as tags and a fenced block in the asset
 description, so the moments are findable from Immich's own search bar too.
@@ -269,6 +271,34 @@ http://localhost:2283/photos/d625e56a-0254-4d24-ac08-d3cf2d297931
 Filters still apply, so `--like 103 --person Martin` is "more of this, but only where Martin is".
 In the UI every result card has a "more like this" link that does the same thing.
 
+`--since` and `--until` take a calendar day each, `YYYY-MM-DD`, and keep the videos filmed
+between them. Both ends include their own day, and the bound is the capture date Immich holds
+for the video, not when it was uploaded. Like the person filter, this runs before either
+channel scores anything, so the scores you see are relative to what the range left.
+
+```
+$ immich-moments search "a train moving through the dark" --since 2026-06-10 --until 2026-06-16 --limit 3
+        3 scene(s) for 'a train moving through the dark' since 2026-06-10 until 2026-06-16         
+┌───────┬───────┬─────────────────────┬─────────────────────┬──────────────┬──────────────────────┐
+│ score │    at │ video               │ scene               │ people       │ said                 │
+├───────┼───────┼─────────────────────┼─────────────────────┼──────────────┼──────────────────────┤
+│ 0.404 │ 01:42 │ mothersday-ep14.mp4 │ a dark indoor scene │ -            │ interrogation        │
+│       │       │                     │                     │              │ inspector it's a     │
+│       │       │                     │                     │              │ confession.          │
+│ 0.350 │ 00:59 │ mothersday-ep14.mp4 │ a dark indoor scene │ Nadia, Henry │ He told me a story   │
+│       │       │                     │                     │              │ about thirty-one     │
+│       │       │                     │                     │              │ years ago, …         │
+│ 0.305 │ 01:21 │ night-signals.mp4   │ a nightclub dance   │ -            │                      │
+│       │       │                     │ floor               │              │                      │
+└───────┴───────┴─────────────────────┴─────────────────────┴──────────────┴──────────────────────┘
+http://localhost:2283/photos/dc58afad-2843-4202-91bb-8b0ac95c72c4
+```
+
+The train video itself was filmed on 2026-06-07, so the range drops it and the rest of the
+library moves up. A range on its own, with no query and nobody named, lists those videos newest
+first. In the UI the two date boxes sit next to the who menu and live in the URL with
+everything else.
+
 `--json` prints the same hits as the web API does, for piping into something else. `thumb` is
 the path `serve` exposes; the file itself is that name under `$DATA_DIR/thumbs`.
 
@@ -346,7 +376,8 @@ immich-moments on http://127.0.0.1:8099
 
 One page, one search box, a slider for the blend, thumbnails, and a link into Immich for every
 scene. The `who` menu lists the people the index knows and how many scenes each is in, and the
-name under any result filters on that person when you click it. "more like this" on a card ranks
+name under any result filters on that person when you click it. The two date boxes bound the
+range the videos were filmed in. "more like this" on a card ranks
 the whole index against that scene's picture. The query, the filters and the scene being ranked
 against all live in the URL, so a search is a link you can keep.
 

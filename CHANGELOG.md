@@ -38,6 +38,9 @@ First release.
 - `search --like SCENE_ID`, and "more like this" on every card in the UI: ranks the index
   against one scene's vector instead of a query. Filters still apply, and the score is a
   plain cosine rather than the blended one.
+- `search --since` and `--until`, and the two date boxes in the UI: bounds the search by the
+  day the video was filmed. Inclusive at both ends, and applied before either channel scores
+  anything.
 - Configuration from environment variables or an `immich-moments.toml`.
 - A Docker image and a compose snippet that sits beside an existing Immich stack.
 

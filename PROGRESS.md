@@ -4,8 +4,8 @@ Status: v1.0.0 complete and verified locally. Nothing has been published.
 
 ## What exists
 
-A Python 3.12 package, `immich-moments`, with four commands (`doctor`, `index`, `search`,
-`serve`) and a single-page web UI. It talks to Immich over the public REST API and to Immich's
+A Python 3.12 package, `immich-moments`, with five commands (`doctor`, `index`, `search`,
+`relabel`, `serve`) and a single-page web UI. It talks to Immich over the public REST API and to Immich's
 own machine-learning container. It does not fork Immich, touch its database, re-encode video,
 or call any cloud service.
 
@@ -86,6 +86,9 @@ them was believed.
 - `search --like SCENE_ID` and "more like this" in the UI, ranking against one scene's vector
   rather than a query. It shares the candidate selection with the visual channel, so the
   filters and the missing-vector handling are the same code.
+- `search --since` / `--until` and the date boxes in the UI, bounding a search by the day the
+  video was filmed. It is one more clause in the same `Filters` object, so it narrows the
+  vectors, the transcript and "more like this" without any of them knowing about dates.
 - `relabel`, which re-scores the stored vectors against a new vocabulary. On the 16-video
   index the default vocabulary changes nothing, which is the check that the labels on disk
   still match the vectors they came from. A real run against a copy moved 209 of 210 scenes

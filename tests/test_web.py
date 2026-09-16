@@ -273,3 +273,24 @@ def test_an_index_built_with_another_model_refuses_to_serve(seeded: Config) -> N
     app = create_app(seeded, immich_transport=immich_transport(), ml_transport=ml_transport(CANDLES))
     with pytest.raises(DimensionMismatch, match="--reindex"), TestClient(app):
         pass  # pragma: no cover - startup raises
+
+
+def test_a_date_range_keeps_only_the_videos_taken_inside_it(client: TestClient) -> None:
+    """The one seeded video was filmed on 2026-06-01."""
+    inside = client.get("/api/search", params={"q": "candles", "since": "2026-06-01"}).json()
+    outside = client.get("/api/search", params={"q": "candles", "until": "2026-05-31"}).json()
+
+    assert inside["since"] == "2026-06-01"
+    assert inside["count"] == 2
+    assert outside["count"] == 0
+
+
+def test_a_date_range_alone_browses_those_videos(client: TestClient) -> None:
+    body = client.get("/api/search", params={"since": "2026-01-01", "until": "2026-12-31"}).json()
+    assert body["count"] == 2
+
+
+def test_a_day_that_is_not_a_date_is_a_400(client: TestClient) -> None:
+    response = client.get("/api/search", params={"q": "candles", "since": "last summer"})
+    assert response.status_code == 400
+    assert "2019-07-04" in response.json()["detail"]

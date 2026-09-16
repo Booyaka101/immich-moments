@@ -6,6 +6,7 @@ import re
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import date
 
 import numpy as np
 
@@ -27,9 +28,11 @@ class Filters:
 
     asset_id: str | None = None
     people: tuple[str, ...] = ()
+    since: str | None = None
+    until: str | None = None
 
     def __bool__(self) -> bool:
-        return bool(self.asset_id or self.people)
+        return bool(self.asset_id or self.people or self.since or self.until)
 
     def sql(self, asset_column: str, scene_column: str) -> tuple[str, list]:
         """Extra AND clauses for a query that can reach both columns, and their parameters."""
@@ -44,6 +47,14 @@ class Filters:
                 f"{scene_column} IN (SELECT scene_id FROM scene_faces WHERE lower(person_name) = ?)"  # noqa: S608
             )
             params.append(name.strip().lower())
+        # Immich stores the capture time, so compare the date part and leave the clock out of it.
+        for bound, comparison in ((self.since, ">="), (self.until, "<=")):
+            if bound:
+                clauses.append(
+                    f"{asset_column} IN (SELECT id FROM assets "  # noqa: S608
+                    f"WHERE substr(file_created_at, 1, 10) {comparison} ?)"
+                )
+                params.append(bound)
         return "".join(f" AND {clause}" for clause in clauses), params
 
 
@@ -60,6 +71,23 @@ def resolve_people(store: Store, wanted: Iterable[str]) -> list[str]:
         have = ", ".join(sorted(known.values())) or "nobody yet"
         raise ConfigError(f"no indexed scenes name {', '.join(missing)}. Indexed people: {have}")
     return [known[name.lower()] for name in cleaned]
+
+
+def date_range(since: str | None, until: str | None) -> tuple[str | None, str | None]:
+    """The two calendar-day bounds, checked here so a typo is an error instead of no matches."""
+    bounds = []
+    for value, label in ((since, "since"), (until, "until")):
+        if value is None or not value.strip():
+            bounds.append(None)
+            continue
+        try:
+            bounds.append(date.fromisoformat(value.strip()).isoformat())
+        except ValueError as exc:
+            raise ConfigError(f"{label} wants a date like 2019-07-04, not {value!r}.") from exc
+    first, last = bounds
+    if first and last and first > last:
+        raise ConfigError(f"the range is backwards: since {first} is after until {last}.")
+    return first, last
 
 
 @dataclass(slots=True)

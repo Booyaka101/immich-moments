@@ -168,6 +168,18 @@ def test_a_person_nobody_is_indexed_under_is_not_silently_empty(
     assert "nobody yet" in captured.err
 
 
+def capture_filters(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """The kwargs `search` hands the ranker, so a filter test needs no ranking at all."""
+    seen: dict = {}
+
+    def capture(_store, _ml, _query, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr("immich_moments.cli.run_search", capture)
+    return seen
+
+
 def test_a_person_is_filtered_by_the_spelling_the_index_uses(
     monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
 ) -> None:
@@ -186,6 +198,30 @@ def test_a_person_is_filtered_by_the_spelling_the_index_uses(
 
     assert code == 1  # no hits, because the stub returns none
     assert seen["filters"].people == ("Zoë",)
+
+
+def test_a_date_range_reaches_the_filters(monkeypatch: pytest.MonkeyPatch, capsys, tmp_path) -> None:
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden"])
+    seen = capture_filters(monkeypatch)
+
+    code, _ = run("search", "--since", "2019-07-01", "--until", "2019-07-31", monkeypatch=monkeypatch)
+
+    assert code == 1  # no hits, because the stub returns none
+    assert (seen["filters"].since, seen["filters"].until) == ("2019-07-01", "2019-07-31")
+
+
+def test_a_day_that_is_not_a_date_is_a_sentence_not_a_stack_trace(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    stub_clients(monkeypatch)
+
+    code, _ = run("search", "candles", "--since", "last summer", monkeypatch=monkeypatch)
+
+    captured = capsys.readouterr()
+    assert code == ConfigError.exit_code
+    assert "2019-07-04" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_a_query_and_a_scene_to_rank_against_do_not_mix(monkeypatch: pytest.MonkeyPatch, capsys) -> None:

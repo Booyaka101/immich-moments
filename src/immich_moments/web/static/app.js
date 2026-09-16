@@ -3,6 +3,8 @@ const box = document.getElementById("q");
 const weight = document.getElementById("weight");
 const weightValue = document.getElementById("weight-value");
 const people = document.getElementById("people");
+const since = document.getElementById("since");
+const until = document.getElementById("until");
 const filters = document.getElementById("filters");
 const results = document.getElementById("results");
 const hint = document.getElementById("hint");
@@ -30,19 +32,25 @@ people.addEventListener("change", () => {
   people.value = "";
 });
 
+for (const input of [since, until]) {
+  input.addEventListener("change", rerunOrClear);
+}
+
 window.addEventListener("popstate", () => readUrl(false));
 
 loadPeople();
 readUrl(false);
 
 function anything() {
-  return Boolean(box.value.trim() || active.length || like);
+  return Boolean(box.value.trim() || active.length || like || since.value || until.value);
 }
 
 function readUrl(push) {
   const params = new URLSearchParams(location.search);
   box.value = params.get("q") || "";
   like = params.get("like") ? Number(params.get("like")) : null;
+  since.value = params.get("since") || "";
+  until.value = params.get("until") || "";
   reference = null;
   active.length = 0;
   active.push(...params.getAll("person"));
@@ -136,6 +144,8 @@ function searchParams() {
   const query = box.value.trim();
   if (query) params.set("q", query);
   if (like) params.set("like", String(like));
+  if (since.value) params.set("since", since.value);
+  if (until.value) params.set("until", until.value);
   for (const name of active) params.append("person", name);
   return params;
 }
@@ -166,6 +176,8 @@ function describe(data) {
   if (data.query.trim()) parts.push(`for “${data.query.trim()}”`);
   if (data.like) parts.push(`like “${data.like.label || `scene ${data.like.scene_index}`}” in ${data.like.file_name}`);
   if (data.people.length) parts.push(`with ${data.people.join(" and ")}`);
+  if (data.since) parts.push(`since ${data.since}`);
+  if (data.until) parts.push(`until ${data.until}`);
   return parts.join(" ");
 }
 

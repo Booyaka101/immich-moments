@@ -15,7 +15,15 @@ import pytest
 from immich_moments.config import Config
 from immich_moments.errors import ConfigError
 from immich_moments.ml import MLClient
-from immich_moments.search import Filters, browse, format_timestamp, fts_query, search, similar
+from immich_moments.search import (
+    Filters,
+    browse,
+    date_range,
+    format_timestamp,
+    fts_query,
+    search,
+    similar,
+)
 from immich_moments.store import FaceRecord, SceneRecord, Store, TranscriptRecord, VectorFile
 
 from conftest import unit
@@ -406,3 +414,60 @@ def test_more_like_this_can_be_narrowed_to_a_person(seeded: Store) -> None:
 def test_a_scene_that_is_not_there_says_so(seeded: Store) -> None:
     with pytest.raises(ConfigError, match="not in the index"):
         similar(seeded, 9999)
+
+
+def test_a_date_range_keeps_only_the_videos_taken_inside_it(seeded: Store, config: Config) -> None:
+    """The garden was filmed in May and the birthday in June."""
+    with ml_returning(config, GARDEN) as ml:
+        june = search(seeded, ml, "a garden", visual_weight=1.0, filters=Filters(since="2026-06-01"))
+        may = search(seeded, ml, "a garden", visual_weight=1.0, filters=Filters(until="2026-05-31"))
+
+    assert {hit.asset_id for hit in june} == {"birthday"}
+    assert {hit.asset_id for hit in may} == {"garden"}
+
+
+def test_both_ends_of_the_range_include_their_own_day(seeded: Store, config: Config) -> None:
+    with ml_returning(config, CAKE) as ml:
+        hits = search(
+            seeded, ml, "cake", visual_weight=1.0, filters=Filters(since="2026-06-01", until="2026-06-01")
+        )
+
+    assert {hit.asset_id for hit in hits} == {"birthday"}
+
+
+def test_a_date_range_narrows_the_spoken_words_too(seeded: Store, config: Config) -> None:
+    """The phrase is only said in the June video, so a May range must not find it."""
+    with ml_returning(config, CANDLES) as ml:
+        hits = search(seeded, ml, "happy birthday", visual_weight=0.0, filters=Filters(until="2026-05-31"))
+
+    assert hits == []
+
+
+def test_a_date_range_alone_browses_those_videos(seeded: Store, config: Config) -> None:
+    with ml_returning(config, CANDLES) as ml:
+        hits = search(seeded, ml, "", filters=Filters(since="2026-05-01", until="2026-05-31"))
+
+    assert [hit.asset_id for hit in hits] == ["garden"]
+
+
+def test_more_like_this_obeys_a_date_range(seeded: Store) -> None:
+    ids = scene_ids(seeded)
+
+    _reference, hits = similar(seeded, ids["a garden"], filters=Filters(since="2026-06-01"))
+
+    assert {hit.asset_id for hit in hits} == {"birthday"}
+
+
+def test_a_day_that_is_not_a_date_says_so() -> None:
+    with pytest.raises(ConfigError, match="2019-07-04"):
+        date_range("last summer", None)
+
+
+def test_a_backwards_range_says_so() -> None:
+    with pytest.raises(ConfigError, match="backwards"):
+        date_range("2026-06-01", "2026-05-01")
+
+
+def test_an_empty_range_is_no_filter_at_all() -> None:
+    assert date_range(None, "  ") == (None, None)
+    assert not Filters()
