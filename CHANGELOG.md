@@ -38,6 +38,15 @@ First release.
 - `search --like SCENE_ID`, and "more like this" on every card in the UI: ranks the index
   against one scene's vector instead of a query. Filters still apply, and the score is a
   plain cosine rather than the blended one.
+- `index --prune`: walks the whole library and drops the videos Immich no longer has, with
+  their scenes, transcript, thumbnails and audio sidecar. It refuses `--limit`, since a
+  partial walk cannot say what is gone.
+- Face embeddings are kept per scene, and faces are detected even when nobody is named yet.
+  Naming, renaming or merging a person in Immich reaches the scenes already indexed on the
+  next `index` run, without downloading anything. People Immich no longer lists by name lose
+  theirs in the index the same way.
+- `--write-back` skips a video that has been trashed since it was indexed and says so,
+  instead of ending the run on the first 404.
 - `search --since` and `--until`, and the two date boxes in the UI: bounds the search by the
   day the video was filmed. Inclusive at both ends, and applied before either channel scores
   anything.

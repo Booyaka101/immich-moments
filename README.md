@@ -160,6 +160,74 @@ It checkpoints after every asset, so an interrupted run continues where it stopp
 `--since auto` (the default) only looks at assets added since the last run. `--reindex` throws
 the index away and rebuilds it, which is also what a change of CLIP model needs.
 
+Videos you trash in Immich do not leave the index on their own, because `--since auto` never
+hears about them. `--prune` walks the whole library instead and drops whatever Immich no
+longer has, scenes and transcript included:
+
+```
+$ immich-moments index --prune
+clip=ViT-B-32__openai (512-dim)  faces=buffalo_l  data=D:\tmp\moments-data
+discovered                 15
+people references          8
+videos indexed (visual)    0
+videos indexed (speech)    0
+scenes                     0
+transcript segments        0
+dropped, gone from Immich  rotated_phone_clip.mp4
+                  timings
+┌──────────┬────────┬─────────┬───────────┐
+│ phase    │ assets │ seconds │ per asset │
+├──────────┼────────┼─────────┼───────────┤
+│ discover │     15 │     0.1 │      0.0s │
+│ people   │      8 │     1.9 │      0.2s │
+│ visual   │      0 │     0.0 │         - │
+└──────────┴────────┴─────────┴───────────┘
+```
+
+Faces are detected on every scene whether or not anyone is named yet, and the embedding is
+kept. Name, rename or merge someone in Immich and the next run puts the new name on the scenes
+already indexed. The visual phase does no work, because nothing has to be downloaded or
+decoded to do it:
+
+```
+$ immich-moments index
+clip=ViT-B-32__openai (512-dim)  faces=buffalo_l  data=D:\tmp\moments-data
+discovered                   0
+people references            8
+faces renamed or re-matched  8
+videos indexed (visual)      0
+videos indexed (speech)      0
+scenes                       0
+transcript segments          0
+                  timings
+┌──────────┬────────┬─────────┬───────────┐
+│ phase    │ assets │ seconds │ per asset │
+├──────────┼────────┼─────────┼───────────┤
+│ discover │      0 │     0.1 │         - │
+│ people   │      8 │     1.9 │      0.2s │
+│ visual   │      0 │     0.0 │         - │
+└──────────┴────────┴─────────┴───────────┘
+
+$ immich-moments search --person "Martin Selby" --limit 3
+                                     3 scene(s) with Martin Selby
+┌────────────┬───────┬─────────────────────┬─────────────────────┬──────────────┬─────────────────────┐
+│       date │    at │ video               │ scene               │ people       │ said                │
+├────────────┼───────┼─────────────────────┼─────────────────────┼──────────────┼─────────────────────┤
+│ 2026-06-07 │ 00:05 │ mothersday-ep11.mp4 │ a close up of a     │ Martin Selby │ I got on it Selby.  │
+│            │       │                     │ face                │              │ The platform was    │
+│            │       │                     │                     │              │ empty.              │
+│ 2026-06-07 │ 00:12 │ mothersday-ep11.mp4 │ -                   │ Martin Selby │ My mother put me on │
+│            │       │                     │                     │              │ it. She kept        │
+│            │       │                     │                     │              │ saying, just k…     │
+│ 2026-06-07 │ 00:19 │ mothersday-ep11.mp4 │ a close up of a     │ Martin Selby │ Then it'll be the   │
+│            │       │                     │ face                │              │ first to see what's │
+│            │       │                     │                     │              │ after it.           │
+└────────────┴───────┴─────────────────────┴─────────────────────┴──────────────┴─────────────────────┘
+```
+
+Hiding or deleting a person in Immich works the same way in reverse: their name comes off
+the scenes on the next run.
+
 ### search
 
 ```
@@ -444,6 +512,9 @@ $ curl -s -X POST -H "x-api-key: $IMMICH_API_KEY" -H "content-type: application/
 1 result: mothersday-ep08.mp4
 ```
 
+A video trashed since it was indexed is skipped and named in the output rather than ending
+the run; `index --prune` is what takes it out of the index.
+
 That is the endpoint behind the Description field in Immich's own search filters, so the same
 words typed into Immich find the video. Immich's smart search does not: the same query through
 `/api/search/smart` returns 15 unrelated videos, because it only ever saw one thumbnail per
@@ -522,7 +593,8 @@ full disk.
   (`--labels your-own.txt` replaces it, and `relabel` swaps it without a reindex). They are a
   caption, not a classifier.
 - Faces are matched against people you have already named in Immich. It will not find people
-  Immich does not know, and it never creates or renames anyone.
+  Immich does not know, and it never creates or renames anyone. Naming someone later is
+  enough: the next `index` run re-matches the faces it already holds.
 - The default weight of 0.65 favours vision. Speech-led queries still work at the default,
   but if you want the transcript to lead, `--weight 0.3` or the slider in the UI does it.
 - The blend is a weighted sum of two separately normalised channels with no relevance

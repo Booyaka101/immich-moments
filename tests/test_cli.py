@@ -367,3 +367,15 @@ def labels_on_disk(data_dir) -> list[str | None]:
     )
     with Store(config) as store:
         return [row["label"] for row in store.labelled_scenes()]
+
+
+@pytest.mark.parametrize("extra", [("--limit", "3"), ("--since", "2026-01-01")])
+def test_prune_with_a_partial_walk_is_refused_before_anything_connects(
+    extra: tuple[str, ...], monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Honouring one and ignoring the other would silently drop every video outside the window."""
+    code, _ = run("index", "--prune", *extra, monkeypatch=monkeypatch)
+
+    captured = capsys.readouterr()
+    assert code == ConfigError.exit_code
+    assert "whole library" in captured.err

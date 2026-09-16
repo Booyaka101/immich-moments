@@ -36,6 +36,9 @@ footage, 8 named people.
 | `--like` and "more like this" | 0.984 top cosine against scene 103, and the UI round-trips `?like=103&person=Martin` |
 | `relabel` | the default vocabulary moves nothing, a six-phrase one moves 209 of 210 scenes and back |
 | Docker image | builds, runs, `doctor` passes on Immich's own compose network |
+| renaming a person | renamed Martin to "Martin Selby" in Immich, one `index` run moved 8 faces onto the new name with the visual phase doing no work, and renaming back moved them back |
+| `--prune` | trashed a video in Immich, `index --prune` dropped it by name, its scene left the search and its thumbnail left the disk (209 of 210). Restoring it and re-indexing put all 210 back |
+| `--prune --limit` | refused, exit 2, before any request is sent |
 
 Test suite: 243 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
@@ -51,7 +54,13 @@ also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks
   `ViT-B-32__openai`.
 - Scene labels come from a fixed vocabulary of about 120 English phrases. They caption, they
   do not classify.
-- Faces only match people already named in Immich. Nothing is created or renamed.
+- Faces only match people already named in Immich. Nothing is created or renamed. Naming
+  someone later does reach the scenes already indexed, because the face embeddings are kept.
+- A video whose visual pass failed (corrupt file, ML hiccup) is retried on every run, download
+  included. A failed speech pass leaves no status behind at all. Both are visible in the run
+  report, neither is remembered.
+- Pruned scenes leave dead rows in the vector file. Nothing reads them, but only `--reindex`
+  compacts the file.
 - Whisper transcribes but does not diarise, so the transcript never says who spoke.
 - Write-back never removes a tag it once added.
 - There is no auth on the web UI.
@@ -92,6 +101,13 @@ them was believed.
 - `search --since` / `--until` and the date boxes in the UI, bounding a search by the day the
   video was filmed. It is one more clause in the same `Filters` object, so it narrows the
   vectors, the transcript and "more like this" without any of them knowing about dates.
+- `index --prune`, dropping the videos Immich no longer lists. A full walk of the library is
+  cheap (one request per 250 assets), so the flag simply forces one and diffs the ids.
+- Face embeddings stored per scene, with a re-match after every people refresh. A rename,
+  a merge, a hide or a name given later reaches the scenes already indexed without a
+  download. Faces are now detected on every scene, named people or not, which is one more
+  `/predict` call per scene and is what makes naming later work.
+- `--write-back` skips trashed videos instead of dying on the first 404.
 - `relabel`, which re-scores the stored vectors against a new vocabulary. On the 16-video
   index the default vocabulary changes nothing, which is the check that the labels on disk
   still match the vectors they came from. A real run against a copy moved 209 of 210 scenes
@@ -127,9 +143,10 @@ with a test each, and every assertion the TESTS paragraph asks for.
 ### What is missing, and what was built because it was cheap
 
 Built in this round, because each was a small diff against something that already existed:
-the person filter, `--json`, `--like`, `relabel`, and the `--since` / `--until` range. The
-range in particular is one more clause on the `Filters` object, so it narrows the vectors, the
-transcript and "more like this" without any of them knowing that dates exist.
+the person filter, `--json`, `--like`, `relabel`, the `--since` / `--until` range, `--prune`,
+and the face re-match. The range in particular is one more clause on the `Filters` object, so
+it narrows the vectors, the transcript and "more like this" without any of them knowing that
+dates exist.
 
 Left out, with the reason, in the order I would build them next.
 

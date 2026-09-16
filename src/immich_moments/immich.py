@@ -198,7 +198,15 @@ class ImmichClient:
                 page += 1
 
     def get_asset(self, asset_id: str) -> dict[str, Any]:
-        data = self.get_json(f"/assets/{asset_id}")
+        """The asset record. Gone from Immich is `AssetUnavailable`, the same as for its original."""
+        try:
+            data = self.get_json(f"/assets/{asset_id}")
+        except ImmichError as exc:
+            if exc.status in (404, 410):
+                raise AssetUnavailable(
+                    f"asset {asset_id} is no longer in Immich (HTTP {exc.status})"
+                ) from exc
+            raise
         if not isinstance(data, dict):
             raise ImmichError(f"GET /api/assets/{asset_id} did not return an object")
         return data

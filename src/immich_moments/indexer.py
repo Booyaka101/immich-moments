@@ -16,8 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import Config
-from .errors import AssetUnavailable, MediaError, MomentsError
-from .faces import PeopleIndex, faces_in_frame, load_people_index, refresh_people_refs
+from .errors import AssetUnavailable, ConfigError, MediaError, MomentsError
+from .faces import PeopleIndex, faces_in_frame, load_people_index, refresh_people_refs, rematch_faces
 from .immich import ImmichClient
 from .labels import LabelIndex, build_label_index
 from .media import extract_audio, extract_frame, probe
@@ -47,6 +47,8 @@ class IndexReport:
     unavailable: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
     people_refs: int = 0
+    faces_rematched: int = 0
+    pruned: list[str] = field(default_factory=list)
     timings: list[PhaseTiming] = field(default_factory=list)
     no_audio_track: int = 0
     no_speech: int = 0
@@ -78,14 +80,23 @@ class Indexer:
 
     # ---- phases ----------------------------------------------------------
 
-    def discover(self, since: str | None, limit: int | None = None) -> int:
-        """Record every video asset Immich knows about. Cheap, and safe to repeat."""
-        found = 0
+    def discover(
+        self, since: str | None, limit: int | None = None, *, prune: bool = False
+    ) -> tuple[int, list[str]]:
+        """Record every video asset Immich knows about. Cheap, and safe to repeat.
+
+        With `prune`, anything the index holds that Immich did not list is dropped, which only
+        means something when the whole library was walked. Returns (found, file names dropped).
+        """
+        if prune and (since or limit is not None):
+            raise ConfigError("--prune has to walk the whole library, so it cannot take --since or --limit.")
+        seen: list[str] = []
         truncated = False
         for asset in self.immich.iter_videos(updated_after=since):
             asset_id = asset.get("id")
             if not asset_id:
                 continue
+            seen.append(asset_id)
             self.store.upsert_asset(
                 asset_id,
                 original_file_name=asset.get("originalFileName") or asset_id,
@@ -93,21 +104,31 @@ class Indexer:
                 updated_at=asset.get("updatedAt"),
                 duration_seconds=_duration(asset.get("duration")),
             )
-            found += 1
-            if limit is not None and found >= limit:
+            if limit is not None and len(seen) >= limit:
                 truncated = True
                 break
         # Checkpointing a truncated enumeration would hide every video --limit never reached from
         # the next `--since auto` run, permanently.
         if not truncated:
             self.store.set_state("last_discovery", _now())
-        return found
+        if not prune:
+            return len(seen), []
+        gone = self.store.prune_assets(seen)
+        for row in gone:
+            (self.config.audio_dir / f"{row['id']}.flac").unlink(missing_ok=True)
+        if gone:
+            _prune_thumbnails(self.config, self.store)
+        return len(seen), [row["original_file_name"] for row in gone]
 
-    def refresh_people(self) -> int:
+    def refresh_people(self) -> tuple[int, int]:
+        """(people with a reference, faces whose name changed as a result)."""
         matched, skipped = refresh_people_refs(self.store, self.immich, self.ml, now=_now())
         if skipped:
             log.info("%d Immich people skipped (unnamed, hidden or no detectable thumbnail)", skipped)
-        return matched
+        rematched = rematch_faces(
+            self.store, load_people_index(self.store), max_distance=self.config.face_max_distance
+        )
+        return matched, rematched
 
     def visual_pass(self, report: IndexReport, labels: LabelIndex, limit: int | None = None) -> None:
         people = load_people_index(self.store)
@@ -200,15 +221,15 @@ class Indexer:
                         label=label[0] if label else None,
                         label_score=label[1] if label else None,
                         thumb_path=thumb.name,
+                        # Detected even when nobody is named yet: the embedding is kept, so a
+                        # name given in Immich later reaches this scene without a reindex.
                         faces=faces_in_frame(
                             self.ml,
                             jpeg,
                             people,
                             min_score=self.config.face_min_score,
                             max_distance=self.config.face_max_distance,
-                        )
-                        if len(people)
-                        else [],
+                        ),
                     )
                 )
 
@@ -259,19 +280,20 @@ def run_index(
     phases: tuple[str, ...],
     labels_path: Path | None,
     reindex: bool,
+    prune: bool = False,
     progress: Progress | None = None,
 ) -> IndexReport:
     indexer = Indexer(config, store, immich, ml, progress=progress)
     report = IndexReport()
 
     started = time.monotonic()
-    report.discovered = indexer.discover(since, limit)
+    report.discovered, report.pruned = indexer.discover(since, limit, prune=prune)
     report.timing("discover").seconds = time.monotonic() - started
     report.timing("discover").assets = report.discovered
 
     if "visual" in phases:
         started = time.monotonic()
-        report.people_refs = indexer.refresh_people()
+        report.people_refs, report.faces_rematched = indexer.refresh_people()
         report.timing("people").seconds = time.monotonic() - started
         report.timing("people").assets = report.people_refs
 

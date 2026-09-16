@@ -36,15 +36,19 @@ class PeopleIndex:
 
     def match(self, embedding: np.ndarray, max_distance: float) -> tuple[str, str, float] | None:
         """Nearest named person by cosine distance, or None if nobody is close enough."""
-        if not self.identities:
-            return None
-        distances = 1.0 - self.matrix @ embedding
-        best = int(np.argmin(distances))
-        distance = float(distances[best])
-        if distance > max_distance:
-            return None
-        person_id, name = self.identities[best]
-        return person_id, name, distance
+        return self.match_many(embedding.reshape(1, -1), max_distance)[0]
+
+    def match_many(self, embeddings: np.ndarray, max_distance: float) -> list[tuple[str, str, float] | None]:
+        """One match per row, in one matmul, which is what re-matching a whole index needs."""
+        if not self.identities or embeddings.shape[1] != self.matrix.shape[1]:
+            return [None] * len(embeddings)
+        distances = 1.0 - embeddings @ self.matrix.T
+        nearest = np.argmin(distances, axis=1)
+        hits: list[tuple[str, str, float] | None] = []
+        for row, best in enumerate(nearest):
+            distance = float(distances[row, best])
+            hits.append((*self.identities[int(best)], distance) if distance <= max_distance else None)
+        return hits
 
 
 def load_people_index(store: Store) -> PeopleIndex:
@@ -53,14 +57,21 @@ def load_people_index(store: Store) -> PeopleIndex:
 
 
 def refresh_people_refs(store: Store, immich, ml: MLClient, *, now: str) -> tuple[int, int]:
-    """Build a reference embedding per named Immich person. Returns (matched, skipped)."""
+    """Build a reference embedding per named Immich person. Returns (matched, skipped).
+
+    Someone Immich no longer lists by name (deleted, merged, hidden or un-named) loses their
+    reference here, so the faces that were theirs get re-matched on the next pass. A person
+    whose thumbnail merely failed to fetch keeps the reference they already had.
+    """
     matched = skipped = 0
+    named: list[str] = []
     for person in immich.people():
         name = (person.get("name") or "").strip()
         person_id = person.get("id")
         if not name or not person_id:
             skipped += 1
             continue
+        named.append(person_id)
         try:
             thumbnail = immich.person_thumbnail(person_id)
         except Exception as exc:  # one bad thumbnail must not end the run
@@ -77,7 +88,49 @@ def refresh_people_refs(store: Store, immich, ml: MLClient, *, now: str) -> tupl
             continue
         store.put_person_ref(person_id, name, embedding, now)
         matched += 1
+    dropped = store.delete_person_refs_except(named)
+    if dropped:
+        log.info("%d people are no longer named in Immich; their reference is gone", dropped)
     return matched, skipped
+
+
+def rematch_faces(store: Store, people: PeopleIndex, *, max_distance: float) -> int:
+    """Put every stored face against the current references again. Returns how many changed.
+
+    Naming, renaming or merging someone in Immich changes what an already-indexed face should
+    be called. The embedding is on disk, so no video has to be downloaded again for that.
+    """
+    changed = store.rename_people()
+    rows = store.faces_with_embeddings()
+    decoded = [np.frombuffer(row["embedding"], dtype=np.float32) for row in rows]
+    # Faces embedded by a different face model than the references cannot be compared with
+    # them; they keep whatever name they have until a reindex.
+    if len(people):
+        keep = [i for i, vector in enumerate(decoded) if vector.shape[0] == people.matrix.shape[1]]
+        rows, decoded = [rows[i] for i in keep], [decoded[i] for i in keep]
+    if not rows:
+        return changed
+    hits = people.match_many(np.stack(decoded), max_distance)
+
+    # A merge in Immich can leave one scene with two faces that now both match the same
+    # person. One frame cannot show someone twice, so only the closest keeps the name.
+    closest: dict[tuple[int, str], tuple[float, int]] = {}
+    for row, hit in zip(rows, hits, strict=True):
+        if hit is None:
+            continue
+        key = (row["scene_id"], hit[0])
+        if key not in closest or hit[2] < closest[key][0]:
+            closest[key] = (hit[2], row["id"])
+
+    updates: list[tuple[str | None, str | None, float | None, int]] = []
+    for row, hit in zip(rows, hits, strict=True):
+        if hit is not None and closest[(row["scene_id"], hit[0])][1] != row["id"]:
+            hit = None
+        person_id, name, distance = hit if hit is not None else (None, None, None)
+        if (person_id, name) != (row["person_id"], row["person_name"]):
+            updates.append((person_id, name, distance, row["id"]))
+    store.set_face_matches(updates)
+    return changed + len(updates)
 
 
 def person_reference_embedding(ml: MLClient, thumbnail: bytes) -> np.ndarray | None:
@@ -126,6 +179,7 @@ def faces_in_frame(
                 distance=hit[2] if hit else None,
                 score=face.score,
                 bbox=face.bbox,
+                embedding=face.embedding,
             )
         )
     return _best_per_person(records)

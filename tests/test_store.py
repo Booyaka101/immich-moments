@@ -299,3 +299,79 @@ def test_relabelling_nothing_is_not_a_write(store: Store) -> None:
     seed_asset(store)
     store.set_labels([])
     assert store.labelled_scenes() == []
+
+
+def test_an_index_from_schema_one_gains_the_embedding_column(config: Config) -> None:
+    import sqlite3
+
+    from immich_moments.store import SCHEMA
+
+    without = SCHEMA.replace("    bbox        TEXT,\n    embedding   BLOB\n", "    bbox        TEXT\n")
+    assert without != SCHEMA
+    config.db_path.parent.mkdir(parents=True, exist_ok=True)
+    old = sqlite3.connect(config.db_path)
+    old.executescript(without)
+    old.close()
+
+    with Store(config) as store:
+        columns = {row["name"] for row in store.db.execute("PRAGMA table_info(scene_faces)")}
+        assert "embedding" in columns
+        assert store.get_state("schema_version") == "2"
+
+
+def test_pruning_drops_the_asset_with_everything_hanging_off_it(store: Store, config: Config) -> None:
+    store.check_model("m", 8, reindex=False)
+    vectors = VectorFile(config.vectors_path, 8)
+    for asset_id in ("keep", "gone"):
+        seed_asset(store, asset_id)
+        store.replace_scenes(
+            asset_id,
+            [
+                SceneRecord(
+                    0, 0.0, 5.0, vector=unit(1), faces=[FaceRecord("p1", "Anna", 0.1, 0.9, (1, 2, 3, 4))]
+                )
+            ],
+            vectors,
+            indexed_at=NOW,
+        )
+        store.replace_transcript(
+            asset_id, [TranscriptRecord(0.0, 2.0, f"spoken in {asset_id}")], indexed_at=NOW, has_audio=True
+        )
+
+    gone = store.prune_assets(["keep"])
+
+    assert [row["id"] for row in gone] == ["gone"]
+    assert store.asset("gone") is None
+    assert store.scenes_for("gone") == []
+    assert store.db.execute("SELECT COUNT(*) AS n FROM scene_faces").fetchone()["n"] == 1
+    matched = store.db.execute(
+        "SELECT COUNT(*) AS n FROM transcript_fts WHERE transcript_fts MATCH ?", ("gone",)
+    ).fetchone()
+    assert matched["n"] == 0
+    assert store.prune_assets(["keep"]) == []
+
+
+def test_a_rename_reaches_faces_that_have_no_embedding_to_re_match(store: Store, config: Config) -> None:
+    store.check_model("m", 8, reindex=False)
+    seed_asset(store)
+    store.replace_scenes(
+        "a1",
+        [SceneRecord(0, 0.0, 5.0, vector=unit(1), faces=[FaceRecord("p1", "Anna", 0.1, 0.9, (1, 2, 3, 4))])],
+        VectorFile(config.vectors_path, 8),
+        indexed_at=NOW,
+    )
+    store.put_person_ref("p1", "Anna Lee", unit(1), NOW)
+
+    assert store.rename_people() == 1
+    (face,) = store.faces_for_scenes([store.scenes_for("a1")[0]["id"]]).popitem()[1]
+    assert face["person_name"] == "Anna Lee"
+    assert store.rename_people() == 0
+
+
+def test_people_no_longer_named_lose_their_reference(store: Store) -> None:
+    store.put_person_ref("p1", "Anna", unit(1), NOW)
+    store.put_person_ref("p2", "Tom", unit(2), NOW)
+
+    assert store.delete_person_refs_except(["p1"]) == 1
+    identities, _ = store.people_refs()
+    assert identities == [("p1", "Anna")]

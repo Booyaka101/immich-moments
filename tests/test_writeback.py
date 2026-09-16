@@ -34,6 +34,8 @@ class FakeImmich:
         self.requests.append((request.method, path))
         if request.method == "GET" and path.startswith("/api/assets/"):
             asset_id = path.rsplit("/", 1)[-1]
+            if asset_id not in self.descriptions:
+                return httpx.Response(404, json={"message": "Not found"})
             # Immich returns the description under exifInfo and never at the top level.
             carried = [
                 {"id": tag_id, "value": value}
@@ -335,3 +337,21 @@ def test_a_second_run_has_no_tags_left_to_add(seeded: Store, config: Config) -> 
     assert second.planned == []
     assert second.assets_tagged == 0
     assert second.descriptions_written == 0
+
+
+def test_a_video_gone_from_immich_is_skipped_not_fatal(seeded: Store, config: Config) -> None:
+    """One trashed video must not cost the other thousand their tags."""
+    seeded.upsert_asset("gone", original_file_name="gone.mp4", file_created_at=NOW, updated_at=NOW)
+    seeded.replace_scenes(
+        "gone",
+        [SceneRecord(0, 0.0, 5.0, vector=unit(3, DIM), label="a dog")],
+        VectorFile(config.vectors_path, DIM),
+        indexed_at=NOW,
+    )
+    server = FakeImmich()
+    with server.client(config) as immich:
+        result = write_back(seeded, immich, ["gone", ASSET], dry_run=False)
+
+    assert result.skipped == ["gone.mp4"]
+    assert [plan.asset_id for plan in result.planned] == [ASSET]
+    assert result.descriptions_written == 1

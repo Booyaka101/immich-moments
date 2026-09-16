@@ -12,6 +12,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 
+from .errors import AssetUnavailable
 from .immich import Annotations, ImmichClient
 from .search import format_timestamp, unique_names
 from .store import Store
@@ -46,6 +47,7 @@ class AssetPlan:
 class WriteResult:
     planned: list[AssetPlan]
     considered: int = 0
+    skipped: list[str] = field(default_factory=list)
     tags_created: int = 0
     assets_tagged: int = 0
     descriptions_written: int = 0
@@ -153,12 +155,19 @@ def _transcript_by_scene(store: Store, asset_id: str) -> dict[int, str]:
 def write_back(store: Store, immich: ImmichClient, asset_ids: list[str], *, dry_run: bool) -> WriteResult:
     """Plan every mutation first, then apply it. With dry_run, no write request is sent."""
     plans: list[AssetPlan] = []
+    skipped: list[str] = []
     for asset_id in asset_ids:
-        plan = plan_asset(store, asset_id, current=immich.asset_annotations(asset_id))
+        try:
+            current = immich.asset_annotations(asset_id)
+        except AssetUnavailable as exc:
+            log.warning("%s", exc)
+            skipped.append(store.asset(asset_id)["original_file_name"])
+            continue
+        plan = plan_asset(store, asset_id, current=current)
         if not plan.empty:
             plans.append(plan)
 
-    result = WriteResult(planned=plans, considered=len(asset_ids), dry_run=dry_run)
+    result = WriteResult(planned=plans, considered=len(asset_ids), skipped=skipped, dry_run=dry_run)
     if dry_run or not plans:
         return result
 

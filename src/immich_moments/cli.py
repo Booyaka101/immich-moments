@@ -180,6 +180,10 @@ def index(
     limit: Annotated[int | None, typer.Option("--limit", help="Stop after this many assets.")] = None,
     phase: Annotated[str, typer.Option("--phase", help="all, visual or audio.")] = "all",
     reindex: Annotated[bool, typer.Option("--reindex", help="Throw the index away and rebuild it.")] = False,
+    prune: Annotated[
+        bool,
+        typer.Option("--prune", help="Walk the whole library and drop videos Immich no longer has."),
+    ] = False,
     labels: Annotated[
         Path | None, typer.Option("--labels", help="Custom scene label vocabulary, one per line.")
     ] = None,
@@ -195,6 +199,10 @@ def index(
     """Index every video: scenes, CLIP vectors, faces and speech, checkpointed per asset."""
     config = _setup(config_path, verbose)
     phases = _phases(phase)
+    if prune and (limit is not None or since.strip().lower() not in ("auto", "all")):
+        raise ConfigError(
+            "--prune has to walk the whole library, so it cannot take --limit or a --since date."
+        )
 
     immich, ml, clip_model, face_model = _clients(config)
     with immich, ml, Store(config) as store:
@@ -209,11 +217,12 @@ def index(
             store,
             immich,
             ml,
-            since=_since(store, since),
+            since=None if prune else _since(store, since),
             limit=limit,
             phases=phases,
             labels_path=labels,
             reindex=reindex,
+            prune=prune,
             progress=lambda message: console.print(f"[dim]{escape(message)}[/]"),
         )
         _print_report(report)
@@ -491,6 +500,8 @@ def _print_report(report) -> None:
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_row("discovered", str(report.discovered))
     table.add_row("people references", str(report.people_refs))
+    if report.faces_rematched:
+        table.add_row("faces renamed or re-matched", str(report.faces_rematched))
     table.add_row("videos indexed (visual)", str(report.visual_indexed))
     table.add_row("videos indexed (speech)", str(report.audio_indexed))
     table.add_row("scenes", str(report.scenes))
@@ -499,6 +510,8 @@ def _print_report(report) -> None:
         table.add_row("no audio track", str(report.no_audio_track))
     if report.no_speech:
         table.add_row("no speech found", str(report.no_speech))
+    if report.pruned:
+        table.add_row("dropped, gone from Immich", ", ".join(report.pruned))
     if report.unavailable:
         table.add_row("[yellow]unavailable[/]", ", ".join(report.unavailable))
     for name, message in report.failed:
@@ -519,6 +532,8 @@ def _print_report(report) -> None:
 def _print_writeback(result) -> None:
     heading = "planned mutations (nothing was sent)" if result.dry_run else "write-back"
     console.print(f"\n[bold]{heading}[/]")
+    if result.skipped:
+        console.print(f"[yellow]skipped, gone from Immich: {escape(', '.join(result.skipped))}[/]")
     if not result.planned:
         console.print(
             "[dim]nothing to change: Immich already has everything this index knows.[/]"

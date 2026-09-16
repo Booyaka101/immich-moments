@@ -28,6 +28,21 @@ from conftest import COLOURS, SEGMENT_SECONDS
 DIM = 32
 ASSET_ID = "3f7b0b1a-0000-4000-8000-000000000001"
 FRAME_LABEL = "a colour card"
+FACE = json.dumps([1.0] + [0.0] * (DIM - 1))
+
+
+def portrait_jpeg() -> bytes:
+    """Any JPEG will do for a person thumbnail: the replayed ML container finds a face in it."""
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (256, 256), (180, 140, 120)).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+PORTRAIT = portrait_jpeg()
 
 
 def stable_vector(text: str) -> np.ndarray:
@@ -42,6 +57,9 @@ def ml_transport() -> httpx.MockTransport:
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = request.content.decode("utf-8", "replace")
+        if "facial-recognition" in body:
+            face = {"boundingBox": {"x1": 1, "y1": 1, "x2": 9, "y2": 9}, "score": 0.95, "embedding": FACE}
+            return httpx.Response(200, json={"facial-recognition": [face]})
         if request.headers.get("content-type", "").startswith("multipart/"):
             return httpx.Response(200, json={"clip": json.dumps(stable_vector(FRAME_LABEL).tolist())})
         text = parse_qs(body)["text"][0]
@@ -50,9 +68,13 @@ def ml_transport() -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
-def immich_transport(video: Path, *, missing: bool = False) -> httpx.MockTransport:
+def immich_transport(
+    video: Path, *, missing: bool = False, people: tuple[dict, ...] = ()
+) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if path.endswith("/thumbnail"):
+            return httpx.Response(200, content=PORTRAIT, headers={"content-type": "image/jpeg"})
         if path.endswith("/search/metadata"):
             page = int(json.loads(request.content).get("page", 1))
             if page > 1:
@@ -76,7 +98,7 @@ def immich_transport(video: Path, *, missing: bool = False) -> httpx.MockTranspo
                 },
             )
         if path.endswith("/people"):
-            return httpx.Response(200, json={"people": [], "hasNextPage": False})
+            return httpx.Response(200, json={"people": list(people), "hasNextPage": False})
         if path.endswith("/original"):
             if missing:
                 return httpx.Response(404, json={"message": "Not found"})
@@ -93,10 +115,19 @@ def labels_file(tmp_path: Path) -> Path:
     return path
 
 
-def index(config: Config, store: Store, video: Path, labels_file: Path, *, missing: bool = False):
+def index(
+    config: Config,
+    store: Store,
+    video: Path,
+    labels_file: Path,
+    *,
+    missing: bool = False,
+    people: tuple[dict, ...] = (),
+    prune: bool = False,
+):
     store.check_model("test-clip", DIM, reindex=False)
     with (
-        ImmichClient(config, transport=immich_transport(video, missing=missing)) as immich,
+        ImmichClient(config, transport=immich_transport(video, missing=missing, people=people)) as immich,
         MLClient(config, "test-clip", "test-faces", transport=ml_transport()) as ml,
     ):
         return run_index(
@@ -109,6 +140,7 @@ def index(config: Config, store: Store, video: Path, labels_file: Path, *, missi
             phases=("visual",),
             labels_path=labels_file,
             reindex=False,
+            prune=prune,
         )
 
 
@@ -347,7 +379,7 @@ def catalogue(count: int) -> httpx.MockTransport:
 
 def discover(config: Config, store: Store, *, count: int, limit: int | None) -> int:
     with ImmichClient(config, transport=catalogue(count)) as immich:
-        return Indexer(config, store, immich, ml=None).discover(None, limit=limit)
+        return Indexer(config, store, immich, ml=None).discover(None, limit=limit)[0]
 
 
 def test_a_truncated_discovery_does_not_move_the_checkpoint(config: Config, store: Store) -> None:
@@ -361,3 +393,49 @@ def test_a_complete_discovery_moves_the_checkpoint(config: Config, store: Store)
     assert discover(config, store, count=8, limit=None) == 8
 
     assert store.get_state("last_discovery") is not None
+
+
+def test_naming_someone_after_indexing_reaches_the_scenes_already_indexed(
+    config: Config, store: Store, colour_video: Path, labels_file: Path
+) -> None:
+    """The face embeddings are kept, so a name given in Immich later needs no download."""
+    first = index(config, store, colour_video, labels_file)
+    assert first.faces_rematched == 0
+    assert all(row["person_id"] is None for row in store.faces_with_embeddings())
+
+    second = index(config, store, colour_video, labels_file, people=({"id": "p1", "name": "Anna"},))
+
+    assert second.visual_indexed == 0
+    assert second.people_refs == 1
+    assert second.faces_rematched == len(COLOURS)
+    assert [dict(row) for row in store.people_in_index()] == [{"name": "Anna", "scenes": len(COLOURS)}]
+
+
+def test_prune_drops_the_videos_immich_no_longer_lists(
+    config: Config, store: Store, colour_video: Path, labels_file: Path
+) -> None:
+    config.ensure_dirs()
+    store.upsert_asset("stale", original_file_name="stale.mp4", file_created_at=None, updated_at=None)
+    (config.audio_dir / "stale.flac").write_bytes(b"flac")
+    (config.thumbs_dir / "stale-0000.jpg").write_bytes(b"jpg")
+
+    report = index(config, store, colour_video, labels_file, prune=True)
+
+    assert report.pruned == ["stale.mp4"]
+    assert report.discovered == 1
+    assert store.asset("stale") is None
+    assert not (config.audio_dir / "stale.flac").exists()
+    assert not (config.thumbs_dir / "stale-0000.jpg").exists()
+    assert len(list(config.thumbs_dir.glob("*.jpg"))) == len(COLOURS)
+
+
+def test_prune_refuses_a_partial_walk(config: Config, store: Store) -> None:
+    from immich_moments.errors import ConfigError
+
+    with ImmichClient(config, transport=catalogue(3)) as immich:
+        indexer = Indexer(config, store, immich, ml=None)
+        with pytest.raises(ConfigError, match="whole library"):
+            indexer.discover(None, limit=2, prune=True)
+        with pytest.raises(ConfigError, match="whole library"):
+            indexer.discover("2026-01-01T00:00:00Z", prune=True)
+    assert store.counts()["assets"] == 0

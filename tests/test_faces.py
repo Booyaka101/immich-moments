@@ -19,6 +19,7 @@ from immich_moments.faces import (
     pad_thumbnail,
     person_reference_embedding,
     refresh_people_refs,
+    rematch_faces,
 )
 from immich_moments.immich import ImmichClient
 from immich_moments.ml import MLClient
@@ -251,3 +252,83 @@ def test_the_client_is_the_real_one_when_the_server_answers(store: Store, config
         matched, skipped = refresh_people_refs(store, immich, ml, now=NOW)
 
     assert (matched, skipped) == (1, 0)
+
+
+# ---- re-matching what is already indexed --------------------------------
+
+
+def seed_scene(store: Store, config: Config, *faces: tuple[str | None, str | None, np.ndarray]) -> int:
+    from immich_moments.store import FaceRecord, SceneRecord, VectorFile
+
+    store.check_model("m", DIM, reindex=False)
+    store.upsert_asset("a1", original_file_name="a1.mp4", file_created_at=NOW, updated_at=NOW)
+    records = [
+        FaceRecord(person_id, name, 0.0 if person_id else None, 0.9, (1, 2, 3, 4), embedding=vector)
+        for person_id, name, vector in faces
+    ]
+    (scene_id,) = store.replace_scenes(
+        "a1",
+        [SceneRecord(0, 0.0, 5.0, vector=unit(1, DIM), faces=records)],
+        VectorFile(config.vectors_path, DIM),
+        indexed_at=NOW,
+    )
+    return scene_id
+
+
+def names_in(store: Store, scene_id: int) -> list[str | None]:
+    rows = store.db.execute("SELECT person_name FROM scene_faces WHERE scene_id = ? ORDER BY id", (scene_id,))
+    return [row["person_name"] for row in rows.fetchall()]
+
+
+def test_a_stored_face_takes_the_name_of_a_person_named_later(store: Store, config: Config) -> None:
+    scene_id = seed_scene(store, config, (None, None, ANNA))
+    store.put_person_ref("p1", "Anna", ANNA, NOW)
+
+    assert rematch_faces(store, load_people_index(store), max_distance=0.5) == 1
+    assert names_in(store, scene_id) == ["Anna"]
+    assert rematch_faces(store, load_people_index(store), max_distance=0.5) == 0
+
+
+def test_a_face_whose_person_left_immich_is_unnamed_again(store: Store, config: Config) -> None:
+    scene_id = seed_scene(store, config, ("p1", "Anna", ANNA))
+
+    assert rematch_faces(store, load_people_index(store), max_distance=0.5) == 1
+    assert names_in(store, scene_id) == [None]
+
+
+def test_a_merge_leaves_one_name_per_scene(store: Store, config: Config) -> None:
+    """Tom was merged into Anna in Immich, so both faces now match her; only the closer keeps her."""
+    nearly = (ANNA * 0.9 + TOM * 0.1).astype(np.float32)
+    nearly /= np.linalg.norm(nearly)
+    scene_id = seed_scene(store, config, ("p1", "Anna", ANNA), ("p2", "Tom", nearly))
+    store.put_person_ref("p1", "Anna", ANNA, NOW)
+
+    assert rematch_faces(store, load_people_index(store), max_distance=0.5) == 1
+    assert names_in(store, scene_id) == ["Anna", None]
+
+
+def test_faces_embedded_by_another_face_model_keep_their_name(store: Store, config: Config) -> None:
+    scene_id = seed_scene(store, config, ("p1", "Anna", ANNA))
+    store.put_person_ref("p1", "Anna", unit(1, DIM * 2), NOW)
+
+    assert rematch_faces(store, load_people_index(store), max_distance=0.5) == 0
+    assert names_in(store, scene_id) == ["Anna"]
+
+
+def test_the_refresh_forgets_people_immich_no_longer_names(store: Store, config: Config) -> None:
+    store.put_person_ref("p9", "Merged Away", TOM, NOW)
+    immich = FakePeople([{"id": "p1", "name": "Anna"}], {"p1": jpeg((256, 256))})
+    ml = ml_returning(config, face_payload((ANNA, 0.9)))
+
+    refresh_people_refs(store, immich, ml, now=NOW)
+
+    assert [name for _, name in load_people_index(store).identities] == ["Anna"]
+
+
+def test_a_thumbnail_that_fails_to_fetch_keeps_the_old_reference(store: Store, config: Config) -> None:
+    store.put_person_ref("p1", "Anna", ANNA, NOW)
+    immich = FakePeople([{"id": "p1", "name": "Anna"}], {"p1": httpx.ConnectError("boom")})
+    ml = ml_returning(config, face_payload((ANNA, 0.9)))
+
+    assert refresh_people_refs(store, immich, ml, now=NOW) == (0, 1)
+    assert [name for _, name in load_people_index(store).identities] == ["Anna"]

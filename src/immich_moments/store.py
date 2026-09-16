@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +14,7 @@ import numpy as np
 from .config import Config
 from .errors import DimensionMismatch, MomentsError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS assets (
@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS scene_faces (
     person_name TEXT,
     distance    REAL,
     score       REAL,
-    bbox        TEXT
+    bbox        TEXT,
+    embedding   BLOB
 );
 CREATE INDEX IF NOT EXISTS scene_faces_scene ON scene_faces(scene_id);
 
@@ -106,6 +107,7 @@ class FaceRecord:
     distance: float | None
     score: float
     bbox: tuple[int, int, int, int]
+    embedding: np.ndarray | None = None
 
 
 @dataclass(slots=True)
@@ -186,8 +188,15 @@ class Store:
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.executescript(SCHEMA)
+        self._migrate()
         self.set_state("schema_version", str(SCHEMA_VERSION))
         self._reclaim_orphan_vectors()
+
+    def _migrate(self) -> None:
+        """Schema 1 kept no face embeddings, so those faces cannot be re-matched, only renamed."""
+        columns = {row["name"] for row in self.db.execute("PRAGMA table_info(scene_faces)")}
+        if "embedding" not in columns:
+            self.db.execute("ALTER TABLE scene_faces ADD COLUMN embedding BLOB")
 
     def _reclaim_orphan_vectors(self) -> None:
         """Vectors are appended before the transaction that points at them, so a run killed in
@@ -324,6 +333,16 @@ class Store:
             "ORDER BY file_created_at DESC, id"
         ).fetchall()
 
+    def prune_assets(self, keep: Collection[str]) -> list[sqlite3.Row]:
+        """Drop every asset not in `keep`, with its scenes, faces and transcript. Returns what went."""
+        rows = self.db.execute("SELECT id, original_file_name FROM assets ORDER BY file_created_at")
+        wanted = set(keep)
+        gone = [row for row in rows.fetchall() if row["id"] not in wanted]
+        if gone:
+            with self.transaction() as db:
+                db.executemany("DELETE FROM assets WHERE id = ?", [(row["id"],) for row in gone])
+        return gone
+
     def indexed_asset_ids(self) -> list[str]:
         """Assets with a visual index, oldest first, which is what write-back walks."""
         rows = self.db.execute(
@@ -379,8 +398,8 @@ class Store:
                 scene_ids.append(scene_id)
                 for face in scene.faces or []:
                     db.execute(
-                        "INSERT INTO scene_faces (scene_id, person_id, person_name, distance, score, bbox) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO scene_faces (scene_id, person_id, person_name, distance, score, bbox, "
+                        "embedding) VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (
                             scene_id,
                             face.person_id,
@@ -388,6 +407,7 @@ class Store:
                             face.distance,
                             face.score,
                             json.dumps(list(face.bbox)),
+                            _blob(face.embedding),
                         ),
                     )
             db.execute(
@@ -428,6 +448,32 @@ class Store:
         for row in rows:
             grouped.setdefault(row["scene_id"], []).append(row)
         return grouped
+
+    def faces_with_embeddings(self) -> list[sqlite3.Row]:
+        """Every stored face that can be matched again without the frame it came from."""
+        return self.db.execute(
+            "SELECT id, scene_id, person_id, person_name, embedding FROM scene_faces "
+            "WHERE embedding IS NOT NULL ORDER BY scene_id, id"
+        ).fetchall()
+
+    def set_face_matches(self, matches: Sequence[tuple[str | None, str | None, float | None, int]]) -> None:
+        if not matches:
+            return
+        with self.transaction() as db:
+            db.executemany(
+                "UPDATE scene_faces SET person_id = ?, person_name = ?, distance = ? WHERE id = ?", matches
+            )
+
+    def rename_people(self) -> int:
+        """Carry a rename in Immich onto faces that have no embedding to re-match. Rows changed."""
+        cursor = self.db.execute(
+            "UPDATE scene_faces SET person_name = "
+            "(SELECT name FROM people_refs WHERE people_refs.person_id = scene_faces.person_id) "
+            "WHERE embedding IS NULL AND person_id IN (SELECT person_id FROM people_refs) "
+            "AND person_name IS NOT "
+            "(SELECT name FROM people_refs WHERE people_refs.person_id = scene_faces.person_id)"
+        )
+        return cursor.rowcount
 
     def people_in_index(self) -> list[sqlite3.Row]:
         """Named people who actually appear in a scene, with how many scenes each is in."""
@@ -478,6 +524,14 @@ class Store:
             (person_id, name, vec.tobytes(), vec.shape[0], updated_at),
         )
 
+    def delete_person_refs_except(self, keep: Collection[str]) -> int:
+        """Forget people Immich no longer lists by name. Returns how many were dropped."""
+        rows = self.db.execute("SELECT person_id FROM people_refs").fetchall()
+        gone = [(row["person_id"],) for row in rows if row["person_id"] not in set(keep)]
+        if gone:
+            self.db.executemany("DELETE FROM people_refs WHERE person_id = ?", gone)
+        return len(gone)
+
     def people_refs(self) -> tuple[list[tuple[str, str]], np.ndarray]:
         rows = self.db.execute(
             "SELECT person_id, name, vector, dim FROM people_refs ORDER BY name"
@@ -488,6 +542,10 @@ class Store:
         keep = [r for r in rows if r["dim"] == dim]
         matrix = np.stack([np.frombuffer(r["vector"], dtype=np.float32) for r in keep])
         return [(r["person_id"], r["name"]) for r in keep], matrix
+
+
+def _blob(vector: np.ndarray | None) -> bytes | None:
+    return None if vector is None else np.ascontiguousarray(vector, dtype=np.float32).tobytes()
 
 
 def _scene_at(scenes: Sequence[sqlite3.Row], seconds: float) -> int | None:
