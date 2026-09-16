@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.2 - 2026-09-16
+
+### Fixed
+
+- The GPU image is published again. Its tag was built from `github.repository`, which carries
+  the owner's capitalisation, and a registry only takes a lowercase repository name, so the
+  `-cuda` variant failed to publish for 1.0.1 while the plain images went up. It now goes
+  through the same metadata action as the rest. No code change.
+
 ## 1.0.1 - 2026-09-16
 
 ### Fixed

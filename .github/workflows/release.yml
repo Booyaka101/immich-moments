@@ -85,12 +85,20 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # Through the same action as the plain tags, because a registry rejects the owner's
+      # capitalisation and github.repository carries it.
+      - id: meta-cuda
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: suffix=-cuda
+          tags: type=semver,pattern={{version}}
       - name: The GPU variant, same code with the CUDA wheels baked in
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           build-args: EXTRAS=cuda
-          tags: ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}-cuda
+          tags: ${{ steps.meta-cuda.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
