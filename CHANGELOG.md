@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- The README said Whisper on the CPU runs at "roughly a fifth of real time", which reads as
+  either five times faster or five times slower than the video. Measured on `small`: 26
+  minutes of audio in 74 seconds, model load included.
+- A release cuts its own GitHub release notes from the CHANGELOG. 1.1.1 reached PyPI and
+  GHCR while the Releases page still said 1.1.0.
+
 ## 1.2.0 - 2026-09-17
 
 ### Added
