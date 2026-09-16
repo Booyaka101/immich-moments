@@ -35,6 +35,23 @@ def test_vector_file_round_trips_rows(config: Config) -> None:
     np.testing.assert_allclose(matrix[1], unit(1), rtol=1e-6)
 
 
+def test_a_mapped_vector_file_reads_the_same_and_lets_go_of_the_file(config: Config) -> None:
+    vectors = VectorFile(config.vectors_path, 8)
+    for seed in range(3):
+        vectors.append(unit(seed))
+    with vectors.mapped() as matrix:
+        np.testing.assert_array_equal(matrix, vectors.read_all())
+        np.testing.assert_allclose(vectors.read_one(2), unit(2), rtol=1e-6)
+    # Windows refuses to delete a file that is still mapped, so reindex would break if the map
+    # outlived the block.
+    config.vectors_path.unlink()
+
+
+def test_mapping_a_vector_file_that_is_not_there_yet_is_empty(config: Config) -> None:
+    with VectorFile(config.vectors_path, 8).mapped() as matrix:
+        assert matrix.shape == (0, 8)
+
+
 def test_vector_file_rejects_the_wrong_shape(config: Config) -> None:
     vectors = VectorFile(config.vectors_path, 8)
     with pytest.raises(DimensionMismatch, match="expected a 8-dim vector"):

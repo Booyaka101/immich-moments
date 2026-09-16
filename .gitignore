@@ -14,3 +14,4 @@ htmlcov/
 /data/
 .env
 .venv-clean/
+/tools/.scale-stores/
