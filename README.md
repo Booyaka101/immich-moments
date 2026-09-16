@@ -654,11 +654,11 @@ full disk.
   for things you later drop from the index.
 - Immich has no deep link to a timestamp inside a video, so a result links to the asset and
   tells you where to scrub to.
-- Search holds the whole vector file in memory for the length of a query, about 2 KB per
-  scene. A 7,000 video library answers in roughly 290 ms and peaks around 660 MB; 18,000
-  videos takes about 730 ms and peaks near 1.6 GB. The memory is transient, but a container
-  with a hard memory limit sees the peak. Narrowing by person, album or date roughly halves
-  the time and does not reduce the peak, since the file is read before the filter applies.
+- Search maps the whole vector file for the length of a query, about 2 KB per scene. A 7,000
+  video library answers in roughly 200 ms and peaks around 270 MB; 18,000 videos takes about
+  490 ms and peaks near 610 MB. Most of that peak is the mapping, so it is page cache the
+  kernel can reclaim rather than heap, but a container with a hard memory limit still sees it.
+  Narrowing by person, album or date roughly halves the time.
   `tools/scale_bench.py` reproduces all of this.
 - The index is local and single user. There is no auth on the web UI, so bind it to localhost
   or put it behind whatever you already use.

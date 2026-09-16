@@ -42,7 +42,7 @@ footage, 8 named people.
 | `doctor` on a failed video | lists it by name with the ffmpeg error, and still exits 0 |
 | `--album` and the album menu | made two albums in Immich over 6 and 2 of the 16 videos, one `index` run picked both up in 0.1s, `search --album "Night shoots"` returned only that album's scenes, and the UI round-trips `?q=...&album=Night+shoots` |
 
-Test suite: 283 passed, including the two slow tests that really run Whisper. The fast subset
+Test suite: 286 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Measured at scale
@@ -55,30 +55,34 @@ this box, 512-dim vectors, 14 scenes per video.
 
 | scenes | videos | blended | 9% date filter | text only | more like this | vectors | peak RSS |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 5,000 | 357 | 9.8 ms | 5.4 ms | 1.2 ms | 10.6 ms | 9.8 MB | 78 MB |
-| 25,000 | 1,785 | 71 ms | 38 ms | 4.3 ms | 81 ms | 48.8 MB | 202 MB |
-| 100,000 | 7,142 | 290 ms | 151 ms | 19 ms | 350 ms | 195 MB | 662 MB |
-| 250,000 | 17,857 | 726 ms | 380 ms | 46 ms | 892 ms | 488 MB | 1,581 MB |
+| 5,000 | 357 | 7.2 ms | 3.3 ms | 1.2 ms | 5.2 ms | 9.8 MB | 59 MB |
+| 25,000 | 1,785 | 50 ms | 22 ms | 4.4 ms | 41 ms | 48.8 MB | 105 MB |
+| 100,000 | 7,142 | 204 ms | 80 ms | 19 ms | 177 ms | 195 MB | 273 MB |
+| 250,000 | 17,857 | 493 ms | 205 ms | 46 ms | 457 ms | 488 MB | 608 MB |
 
-Latency is linear in scene count, about 2.9 ms per thousand scenes, and search stays usable
-well past any plausible home library. The text channel is cheap throughout, 46 ms at 250,000
-scenes, so FTS5 is not the constraint. The visual channel is all of it.
+Latency is linear in scene count, about 2 ms per thousand scenes, and search stays usable well
+past any plausible home library. The text channel is cheap throughout, 46 ms at 250,000 scenes,
+so FTS5 is not the constraint. The visual channel is all of it.
 
-Two things are worth fixing, neither done yet.
+Those are the numbers after the vector file became a memory map. Before that, a search read the
+whole matrix onto the heap with `np.fromfile` and then fancy-indexed it into a second array,
+even when the selection was every row in id order: two full copies per query. Old code against
+new, same box and same session:
 
-Peak RSS settles at about 3.2x the vector file. `_candidates` calls `VectorFile.read_all`,
-which is a `np.fromfile` of the whole matrix, and then fancy-indexes it into a second array
-even when the selection is every row in id order. That is two full copies per query. The
-working set drops straight back afterwards, so it is transient rather than a leak, but a
-container with a memory cap sees the peak, not the average.
+| scenes | blended | 9% date filter | more like this | peak RSS |
+| --- | --- | --- | --- | --- |
+| 25,000 | 72 to 50 ms | 40 to 22 ms | 86 to 41 ms | 202 to 105 MB |
+| 100,000 | 291 to 204 ms | 151 to 80 ms | 351 to 177 ms | 663 to 273 MB |
+| 250,000 | 755 to 493 ms | 400 to 205 ms | 957 to 457 ms | 1,581 to 608 MB |
 
-Narrowing the search barely helps. A date range that keeps 9% of the library still costs
-about half a full query at every size, because the read happens before the filter is applied
-and so pays for the whole file either way. The filter only saves the matmul.
+Peak working set is now a little over one copy of the vector file rather than three, and that
+copy is a file mapping the kernel can drop under pressure rather than heap it cannot. Narrowing
+finally pays: a date range keeping 9% of the library costs 205 ms instead of 400 at 250,000
+scenes, because only the pages holding those rows get touched.
 
-Memory-mapping the vector file would fix both: the read becomes reclaimable page cache rather
-than anonymous memory, and a narrow filter would touch only the pages it needs. Skipping the
-fancy index when the filters select everything removes the second copy on the common path.
+What is left is the matmul itself, which is linear and unavoidable without an approximate
+index. That would mean a new dependency, a rebuild path and a recall number to measure, and it
+buys nothing below a quarter of a million scenes.
 
 ## Known limits, written down rather than hidden
 

@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- A search maps the vector file instead of reading it into memory twice. It used to load the
+  whole matrix and then copy it again row by row, even when it was keeping every row, so peak
+  memory ran at about three times the file and a container with a hard limit saw that peak. At
+  250,000 scenes a query now takes 493 ms and peaks at 608 MB, against 755 ms and 1.6 GB
+  before, and a date filter that keeps 9% of the library takes 205 ms rather than 400 ms.
+  Results are unchanged.
+
 ## 1.0.3 - 2026-09-16
 
 ### Fixed
