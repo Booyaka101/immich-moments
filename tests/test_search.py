@@ -7,6 +7,8 @@ ranking is tested for what it does with a vector rather than for what a model pr
 from __future__ import annotations
 
 import json
+import sqlite3
+from urllib.parse import parse_qs
 
 import httpx
 import numpy as np
@@ -17,6 +19,7 @@ from immich_moments.config import Config
 from immich_moments.errors import ConfigError
 from immich_moments.ml import MLClient
 from immich_moments.search import (
+    REFERENCE_PHRASES,
     Filters,
     browse,
     date_range,
@@ -26,6 +29,7 @@ from immich_moments.search import (
     resolve_people,
     search,
     similar,
+    visual_reference,
 )
 from immich_moments.store import FaceRecord, SceneRecord, Store, TranscriptRecord, VectorFile
 
@@ -559,3 +563,96 @@ def test_a_person_and_an_album_are_resolved_the_same_way(store: Store) -> None:
         resolve_people(store, ["Anna"])
     with pytest.raises(ConfigError, match="Indexed albums: none yet"):
         resolve_albums(store, ["Family 2026"])
+
+
+def ml_by_phrase(config: Config, vectors: dict[str, np.ndarray], fallback: np.ndarray) -> MLClient:
+    """An ML server that answers each phrase differently, which the reference needs."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        text = parse_qs(request.content.decode())["text"][0]
+        vector = vectors.get(text, fallback)
+        return httpx.Response(200, json={"clip": json.dumps([float(x) for x in vector])})
+
+    return MLClient(config, "ViT-B-32__openai", "buffalo_l", transport=httpx.MockTransport(handler))
+
+
+# Close to every scene without being any of them, which is what a hub scene does to a phrase
+# the library has no answer for.
+LUKEWARM = (CANDLES + CAKE + TABLE + GARDEN) / np.linalg.norm(CANDLES + CAKE + TABLE + GARDEN)
+
+
+def test_the_reference_is_what_a_phrase_with_no_answer_still_scores(seeded: Store, config: Config) -> None:
+    with ml_by_phrase(config, {}, LUKEWARM) as ml:
+        floor = visual_reference(seeded, ml)
+
+    assert floor == pytest.approx(float(max(LUKEWARM @ v for v in (CANDLES, CAKE, TABLE, GARDEN))))
+
+
+def test_a_query_the_library_answers_beats_the_reference(seeded: Store, config: Config) -> None:
+    with ml_by_phrase(config, {"blowing out candles": CANDLES}, LUKEWARM) as ml:
+        floor = visual_reference(seeded, ml)
+        hits = search(seeded, ml, "blowing out candles", visual_weight=1.0)
+
+    assert hits[0].visual_score > floor
+
+
+def test_a_query_it_does_not_answer_does_not(seeded: Store, config: Config) -> None:
+    """The whole point: something always comes top, so the top has to be measured against
+    what comes top for a phrase nobody filmed."""
+    with ml_by_phrase(config, {}, LUKEWARM) as ml:
+        floor = visual_reference(seeded, ml)
+        hits = search(seeded, ml, "a helicopter", visual_weight=1.0)
+
+    assert hits and hits[0].visual_score <= floor
+
+
+def test_the_reference_is_measured_once_and_kept(seeded: Store, config: Config) -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"clip": json.dumps([float(x) for x in LUKEWARM])})
+
+    ml = MLClient(config, "ViT-B-32__openai", "buffalo_l", transport=httpx.MockTransport(handler))
+    with ml:
+        assert visual_reference(seeded, ml) == visual_reference(seeded, ml)
+
+    assert calls == len(REFERENCE_PHRASES)
+
+
+def test_the_reference_is_measured_again_when_the_library_grows(seeded: Store, config: Config) -> None:
+    """A new scene can be the one that sits near everything, which moves the floor."""
+    with ml_by_phrase(config, {}, LUKEWARM) as ml:
+        before = visual_reference(seeded, ml)
+        seeded.replace_scenes(
+            "garden",
+            [
+                SceneRecord(0, 0.0, 10.0, vector=GARDEN, label="a garden"),
+                SceneRecord(1, 10.0, 20.0, vector=LUKEWARM, label="a hub"),
+            ],
+            VectorFile(config.vectors_path, DIM),
+            indexed_at=NOW,
+        )
+        after = visual_reference(seeded, ml)
+
+    assert after == pytest.approx(1.0)
+    assert after > before
+
+
+def test_an_empty_library_has_no_reference(store: Store, config: Config) -> None:
+    with ml_by_phrase(config, {}, LUKEWARM) as ml:
+        assert visual_reference(store, ml) is None
+
+
+def test_a_locked_database_costs_the_cache_not_the_search(
+    seeded: Store, config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`serve` is the first thing to write during a search, and `index` holds the write lock."""
+    monkeypatch.setattr(
+        seeded, "set_state", lambda *_a: (_ for _ in ()).throw(sqlite3.OperationalError("locked"))
+    )
+    with ml_by_phrase(config, {}, LUKEWARM) as ml:
+        assert visual_reference(seeded, ml) == pytest.approx(
+            float(max(LUKEWARM @ v for v in (CANDLES, CAKE, TABLE, GARDEN)))
+        )

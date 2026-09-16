@@ -248,6 +248,7 @@ main { padding: 22px max(20px, 4vw) 72px; }
 #results:focus-visible { outline: none; }
 .note { margin: 0 0 18px; color: var(--dim); }
 .note.error { color: var(--warn); }
+.note.weak { color: var(--text); }
 
 #results {
   display: grid;

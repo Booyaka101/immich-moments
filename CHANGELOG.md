@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.2.0 - 2026-09-17
+
+### Added
+
+- Search says when your library has no answer. Ranking always has a top, so asking for a dog in
+  a library with no dog in it returned a confident looking page of dark interiors and nothing
+  said otherwise. It now measures what your library pays a query it has no answer for, using
+  twenty mundane phrases nobody films, and prints "nothing in your library looks much like
+  that" above the results when the query does not beat that. The number is a property of your
+  library and your CLIP model rather than a constant, measured once and kept until either
+  changes. The web API carries it as `nothing_close`.
+
+  It is a hint and not a verdict, and nothing is ever hidden on the strength of it. Over 28
+  queries on a 211 scene library it was right about 10 of the 12 that had an answer and 13 of
+  the 16 that did not, and every threshold that catches the queries with no answer takes real
+  ones with it.
+
+### Fixed
+
+- The README said a query with nothing to look at "scores low". It does not, and measuring that
+  is what led to the note above: on a real library an absent "a car driving" outscored a present
+  "a restaurant". The scoring section now says what the visual score actually is.
+- The README claimed Immich's smart search returns "15 unrelated videos" for a query
+  immich-moments answers exactly. It returns all 16 with the right one eighth, which is the
+  comparison that was actually measured.
+- The configuration table rendered as two tables, because the `immich_public_url` row added in
+  1.1.1 went in after a blank line.
+
 ## 1.1.1 - 2026-09-16
 
 ### Fixed

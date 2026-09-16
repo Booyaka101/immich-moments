@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import httpx
 import numpy as np
@@ -341,3 +342,36 @@ def test_an_album_the_index_does_not_know_is_a_400(client: TestClient) -> None:
     response = client.get("/api/search", params={"q": "candles", "album": "Holiday"})
     assert response.status_code == 400
     assert "Holiday" in response.json()["detail"]
+
+
+def ml_by_phrase(answers: dict[str, np.ndarray], fallback: np.ndarray) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        text = parse_qs(request.content.decode())["text"][0]
+        return httpx.Response(200, json={"clip": json.dumps([float(x) for x in answers.get(text, fallback)])})
+
+    return httpx.MockTransport(handler)
+
+
+LUKEWARM = (CANDLES + CAKE) / np.linalg.norm(CANDLES + CAKE)
+
+
+def test_a_query_the_library_has_no_answer_for_says_so(seeded: Config) -> None:
+    """Something always comes top, so a page of results is not on its own a match."""
+    app = create_app(seeded, immich_transport=immich_transport(), ml_transport=ml_by_phrase({}, LUKEWARM))
+    with TestClient(app) as client:
+        body = client.get("/api/search", params={"q": "a helicopter"}).json()
+
+    assert body["hits"]
+    assert body["nothing_close"] is True
+
+
+def test_a_query_it_does_answer_does_not(seeded: Config) -> None:
+    app = create_app(
+        seeded,
+        immich_transport=immich_transport(),
+        ml_transport=ml_by_phrase({"blowing out candles": CANDLES}, LUKEWARM),
+    )
+    with TestClient(app) as client:
+        body = client.get("/api/search", params={"q": "blowing out candles"}).json()
+
+    assert body["nothing_close"] is False

@@ -32,7 +32,7 @@ from .immich import ImmichClient
 from .indexer import run_index
 from .labels import build_label_index
 from .ml import MLClient
-from .search import Filters, Hit, date_range, resolve_albums, resolve_people
+from .search import Filters, Hit, date_range, resolve_albums, resolve_people, visual_reference
 from .search import search as run_search
 from .search import similar as run_similar
 from .store import Store
@@ -394,6 +394,7 @@ def search(
 
     immich, ml, clip_model, _face = _clients(config)
     reference = None
+    nothing_close = False
     with immich, ml, Store(config) as store:
         store.assert_model(clip_model)
         people = resolve_people(store, wanted)
@@ -405,17 +406,14 @@ def search(
             since=first,
             until=last,
         )
+        blend = config.visual_weight if weight is None else weight
         if like is not None:
             reference, hits = run_similar(store, like, limit=limit, filters=filters)
         else:
-            hits = run_search(
-                store,
-                ml,
-                query,
-                limit=limit,
-                visual_weight=config.visual_weight if weight is None else weight,
-                filters=filters,
-            )
+            hits = run_search(store, ml, query, limit=limit, visual_weight=blend, filters=filters)
+            if hits and blend > 0:
+                floor = visual_reference(store, ml)
+                nothing_close = floor is not None and hits[0].visual_score <= floor
     if as_json:
         console.print_json(json.dumps([hit.as_dict(config.browser_url) for hit in hits]))
         raise typer.Exit(0 if hits else 1)
@@ -444,6 +442,11 @@ def search(
             escape(hit.label or "-"),
             escape(", ".join(hit.people) or "-"),
             escape(_shorten(hit.transcript, 48)),
+        )
+    if nothing_close:
+        console.print(
+            "[yellow]Nothing in your library looks much like that.[/] These are the closest "
+            "scenes to it, which is not the same as a match."
         )
     console.print(table)
     console.print(f"[dim]{hits[0].immich_url(config.browser_url)}[/]")

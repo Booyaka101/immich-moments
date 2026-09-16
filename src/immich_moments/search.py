@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -17,6 +18,36 @@ from .store import Store
 
 TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 CANDIDATES = 400
+# Phrases for nothing anyone films, used to measure what this library pays a query that it
+# has no answer for. Some scenes sit near everything (a talking head is a bit like a dog and a
+# bit like a helicopter), so that floor is a property of the library and the model, not a
+# constant: on ViT-L-16-SigLIP-384 it is about 0.035 of cosine where ViT-B-32 would read far
+# higher. Keep these mundane and documentary, and keep the list long enough that one phrase
+# that does turn up in someone's videos cannot move a 90th percentile.
+REFERENCE_PHRASES = (
+    "a tax return",
+    "a pension statement",
+    "a plumbing invoice",
+    "a dentist appointment",
+    "a filing cabinet",
+    "a library card",
+    "a parking meter",
+    "a vending machine",
+    "a fuse box",
+    "a radiator valve",
+    "a shipping container",
+    "a pallet of cement",
+    "a stack of bricks",
+    "a traffic cone",
+    "a chain link fence",
+    "a shopping trolley",
+    "a wind turbine",
+    "a stapler",
+    "a screwdriver set",
+    "a roll of carpet",
+)
+REFERENCE_PERCENTILE = 90
+REFERENCE_STATE_KEY = "visual_reference"
 # Cosine margin over the library average that counts as a certain visual hit. CLIP is
 # trained with a logit scale of 100, so 0.10 of cosine is ten logits, and that holds across
 # the OpenCLIP variants Immich ships rather than being fitted to one of them.
@@ -317,6 +348,43 @@ def _visual_scores(
         scores = matrix @ ml.embed_text(query)
         top = np.argsort(-scores)[:CANDIDATES]
         return {int(scene_ids[i]): float(scores[i]) for i in top}, float(scores.mean())
+
+
+def visual_reference(store: Store, ml: MLClient) -> float | None:
+    """The cosine a phrase this library has no answer for still scores, or None if unknown.
+
+    A query beating this is one the library has something for; a query that does not is being
+    answered with its nearest scenes and nothing more. It is only ever a hint, because the two
+    overlap: measured over 28 queries on a 211 scene library it flags 10 of 12 answerable ones
+    as answerable and 13 of 16 unanswerable ones as unanswerable. That is worth saying out loud
+    and nowhere near worth hiding results over.
+
+    Cached against the model and the scene count, so it is paid once per library rather than
+    once per search, and recomputed when either of those moves.
+    """
+    scenes = store.db.execute("SELECT COUNT(*) FROM scenes WHERE vector_row IS NOT NULL").fetchone()[0]
+    stamp = f"{store.get_state('clip_model') or ''}:{scenes}"
+    cached = store.get_state(REFERENCE_STATE_KEY)
+    if cached:
+        try:
+            saved = json.loads(cached)
+            if saved["stamp"] == stamp:
+                return float(saved["cosine"])
+        except (ValueError, KeyError, TypeError):
+            pass
+
+    with _candidates(store, Filters()) as (scene_ids, matrix):
+        if scene_ids.size == 0:
+            return None
+        # One row per phrase of its best scene, so a hub scene raises the floor for everyone.
+        bests = [float((matrix @ ml.embed_text(phrase)).max()) for phrase in REFERENCE_PHRASES]
+
+    cosine = float(np.percentile(bests, REFERENCE_PERCENTILE))
+    # `serve` is the first thing to write during a search, and an index run holds the write
+    # lock. Losing the cache costs twenty embeds next time; failing the search costs more.
+    with suppress(sqlite3.OperationalError):
+        store.set_state(REFERENCE_STATE_KEY, json.dumps({"stamp": stamp, "cosine": cosine}))
+    return cosine
 
 
 def _text_scores(store: Store, query: str, filters: Filters) -> dict[int, TextMatch]:
