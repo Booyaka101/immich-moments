@@ -19,7 +19,7 @@ from immich_moments.config import Config
 from immich_moments.errors import ConfigError, ImmichError, StorageError
 from immich_moments.labels import LabelIndex
 from immich_moments.search import Hit
-from immich_moments.store import SceneRecord, Store
+from immich_moments.store import FaceRecord, SceneRecord, Store
 
 from conftest import unit
 
@@ -168,6 +168,36 @@ def test_a_person_nobody_is_indexed_under_is_not_silently_empty(
     assert "nobody yet" in captured.err
 
 
+def test_a_person_is_filtered_by_the_spelling_the_index_uses(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
+) -> None:
+    """SQLite's lower() is ASCII only, so the typed name is resolved before it reaches SQL."""
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden"], person="Zoë")
+    seen = {}
+
+    def capture(_store, _ml, _query, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr("immich_moments.cli.run_search", capture)
+
+    code, _ = run("search", "--person", "ZOË", monkeypatch=monkeypatch)
+
+    assert code == 1  # no hits, because the stub returns none
+    assert seen["filters"].people == ("Zoë",)
+
+
+def test_a_query_and_a_scene_to_rank_against_do_not_mix(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    stub_clients(monkeypatch)
+
+    code, _ = run("search", "candles", "--like", "3", monkeypatch=monkeypatch)
+
+    captured = capsys.readouterr()
+    assert code == ConfigError.exit_code
+    assert "takes no query" in captured.err
+
+
 def test_json_output_is_machine_readable(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     stub_clients(monkeypatch)
     hit = Hit(
@@ -197,7 +227,7 @@ def test_json_output_is_machine_readable(monkeypatch: pytest.MonkeyPatch, capsys
     assert payload[0]["immich_url"] == "http://immich.test/photos/a1"
 
 
-def seed_index(data_dir, labels) -> None:
+def seed_index(data_dir, labels, person: str | None = None) -> None:
     """A two-scene index on disk, so `relabel` has real vectors to read back."""
     config = Config(
         immich_url="http://immich.test",
@@ -218,7 +248,15 @@ def seed_index(data_dir, labels) -> None:
         store.replace_scenes(
             "a1",
             [
-                SceneRecord(index, 0.0, 5.0, vector=unit(index), label=label, label_score=0.3)
+                SceneRecord(
+                    index,
+                    0.0,
+                    5.0,
+                    vector=unit(index),
+                    label=label,
+                    label_score=0.3,
+                    faces=[FaceRecord("p1", person, 0.2, 0.9, (1, 2, 3, 4))] if person else None,
+                )
                 for index, label in enumerate(labels)
             ],
             store.vectors(8),

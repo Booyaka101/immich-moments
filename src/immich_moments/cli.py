@@ -1,4 +1,4 @@
-"""Command line: doctor, index, search, serve."""
+"""Command line: doctor, index, search, relabel, serve."""
 
 from __future__ import annotations
 
@@ -22,8 +22,9 @@ from .immich import ImmichClient
 from .indexer import run_index
 from .labels import build_label_index
 from .ml import MLClient
-from .search import Filters
+from .search import Filters, Hit, resolve_people
 from .search import search as run_search
+from .search import similar as run_similar
 from .store import Store
 from .writeback import write_back as apply_write_back
 
@@ -49,6 +50,8 @@ ConfigOption = Annotated[
     Path | None, typer.Option("--config", "-c", help="Path to an immich-moments.toml file.")
 ]
 VerboseOption = Annotated[bool, typer.Option("--verbose", "-v", help="Show per-step logging.")]
+# What LabelIndex returns for one scene: the winning label and its cosine, or nothing.
+Pick = tuple[str, float] | None
 
 
 @app.callback()
@@ -278,7 +281,7 @@ def relabel(
             )
 
 
-def _print_relabel(total: int, picks: list, changes: list) -> None:
+def _print_relabel(total: int, picks: list[Pick], changes: list[tuple[int, str | None, Pick]]) -> None:
     labelled = sum(1 for pick in picks if pick)
     gained = sum(1 for _id, old, pick in changes if old is None)
     lost = sum(1 for _id, old, pick in changes if pick is None)
@@ -313,32 +316,43 @@ def search(
         list[str] | None,
         typer.Option("--person", "-p", help="Only scenes this person appears in. Repeatable."),
     ] = None,
+    like: Annotated[
+        int | None,
+        typer.Option("--like", help="Scene id to find more of, instead of a query."),
+    ] = None,
     as_json: Annotated[bool, typer.Option("--json", help="Print the hits as JSON.")] = False,
     config_path: ConfigOption = None,
     verbose: VerboseOption = False,
 ) -> None:
     """Search the index and print the matching scenes with timestamps.
 
-    With --person or --asset and no query, it lists those scenes newest video first.
+    With --person or --asset and no query, it lists those scenes newest video first. With
+    --like it ranks by picture alone against the scene you name.
     """
     config = _setup(config_path, verbose)
-    people = [name.strip() for name in (person or []) if name.strip()]
-    filters = Filters(asset_id=asset, people=tuple(people))
-    if not query.strip() and not filters:
+    wanted = [name.strip() for name in (person or []) if name.strip()]
+    if like is not None and query.strip():
+        raise ConfigError("--like ranks against one scene's picture, so it takes no query.")
+    if like is None and not query.strip() and not wanted and not asset:
         raise ConfigError("give me something to search for, or --person NAME to browse.")
 
     immich, ml, clip_model, _face = _clients(config)
+    reference = None
     with immich, ml, Store(config) as store:
         store.assert_model(clip_model)
-        _known_people(store, people)
-        hits = run_search(
-            store,
-            ml,
-            query,
-            limit=limit,
-            visual_weight=config.visual_weight if weight is None else weight,
-            filters=filters,
-        )
+        people = resolve_people(store, wanted)
+        filters = Filters(asset_id=asset, people=tuple(people))
+        if like is not None:
+            reference, hits = run_similar(store, like, limit=limit, filters=filters)
+        else:
+            hits = run_search(
+                store,
+                ml,
+                query,
+                limit=limit,
+                visual_weight=config.visual_weight if weight is None else weight,
+                filters=filters,
+            )
     if as_json:
         console.print_json(json.dumps([hit.as_dict(config.immich_url) for hit in hits]))
         raise typer.Exit(0 if hits else 1)
@@ -346,9 +360,9 @@ def search(
         console.print("[yellow]No scenes matched.[/] Index some videos first, or try fewer words.")
         raise typer.Exit(1)
 
-    table = Table(title=f"{len(hits)} scene(s) {_describe(query, people)}", header_style="bold")
+    table = Table(title=f"{len(hits)} scene(s) {_describe(query, people, reference)}", header_style="bold")
     # Nothing is scored when there is no query, so the column shows the date that ordered them.
-    table.add_column("date" if not query.strip() else "score", justify="right")
+    table.add_column(_score_column(query, reference), justify="right")
     table.add_column("at", justify="right")
     # The filename is how you find the video again, so it keeps its width and "said" gives way.
     table.add_column("video", min_width=18, overflow="fold")
@@ -357,7 +371,7 @@ def search(
     table.add_column("said", max_width=30)
     for hit in hits:
         table.add_row(
-            (hit.file_created_at or "")[:10] if not query.strip() else f"{hit.score:.3f}",
+            (hit.file_created_at or "")[:10] if not query.strip() and not reference else f"{hit.score:.3f}",
             hit.timestamp,
             escape(hit.original_file_name),
             escape(hit.label or "-"),
@@ -368,24 +382,24 @@ def search(
     console.print(f"[dim]{hits[0].immich_url(config.immich_url)}[/]")
 
 
-def _describe(query: str, people: list[str]) -> str:
+def _describe(query: str, people: list[str], reference: Hit | None = None) -> str:
     """The table title: what was asked for, in the order the filters were applied."""
     parts = []
     if query.strip():
         parts.append(f"for {query.strip()!r}")
+    if reference is not None:
+        what = f"{reference.label!r}" if reference.label else f"scene {reference.scene_index}"
+        parts.append(f"like {what} in {reference.original_file_name}")
     if people:
         parts.append("with " + " and ".join(people))
     return " ".join(parts)
 
 
-def _known_people(store: Store, wanted: list[str]) -> None:
-    """A misspelled name would otherwise look like a person who is simply not in any video."""
-    known = {row["name"].lower(): row["name"] for row in store.people_in_index()}
-    missing = [name for name in wanted if name.lower() not in known]
-    if not missing:
-        return
-    have = ", ".join(sorted(known.values())) or "nobody yet"
-    raise ConfigError(f"no indexed scenes name {', '.join(missing)}. Indexed people: {have}")
+def _score_column(query: str, reference: Hit | None) -> str:
+    """A cosine against one scene, a blended score for a query, and a date when neither ranks."""
+    if reference is not None:
+        return "cosine"
+    return "score" if query.strip() else "date"
 
 
 @app.command()

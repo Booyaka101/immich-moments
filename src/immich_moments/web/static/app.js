@@ -9,6 +9,8 @@ const hint = document.getElementById("hint");
 const button = form.querySelector("button");
 
 const active = [];
+let like = null;
+let reference = null;
 
 weight.addEventListener("input", () => {
   weightValue.textContent = Number(weight.value).toFixed(2);
@@ -19,7 +21,8 @@ weight.addEventListener("change", () => {
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
-  if (box.value.trim() || active.length) run();
+  if (box.value.trim()) clearLike();
+  if (anything()) run();
 });
 
 people.addEventListener("change", () => {
@@ -32,13 +35,19 @@ window.addEventListener("popstate", () => readUrl(false));
 loadPeople();
 readUrl(false);
 
+function anything() {
+  return Boolean(box.value.trim() || active.length || like);
+}
+
 function readUrl(push) {
   const params = new URLSearchParams(location.search);
   box.value = params.get("q") || "";
+  like = params.get("like") ? Number(params.get("like")) : null;
+  reference = null;
   active.length = 0;
   active.push(...params.getAll("person"));
   drawFilters();
-  if (box.value.trim() || active.length) run(push);
+  if (anything()) run(push);
 }
 
 function addPerson(name) {
@@ -53,12 +62,31 @@ function removePerson(name) {
   if (at < 0) return;
   active.splice(at, 1);
   drawFilters();
-  if (box.value.trim() || active.length) run();
-  else {
-    results.replaceChildren();
-    hint.textContent = "Type what you remember, or pick who is in it.";
-    history.pushState({}, "", "/");
+  rerunOrClear();
+}
+
+function showLike(hit) {
+  like = hit.scene_id;
+  reference = hit;
+  box.value = "";
+  drawFilters();
+  run();
+}
+
+function clearLike() {
+  like = null;
+  reference = null;
+  drawFilters();
+}
+
+function rerunOrClear() {
+  if (anything()) {
+    run();
+    return;
   }
+  results.replaceChildren();
+  hint.textContent = "Type what you remember, or pick who is in it.";
+  history.pushState({}, "", "/");
 }
 
 async function loadPeople() {
@@ -77,16 +105,29 @@ async function loadPeople() {
   }
 }
 
+function chip(label, title, onClick) {
+  const node = document.createElement("button");
+  node.type = "button";
+  node.className = "chip active";
+  node.textContent = label;
+  node.title = title;
+  node.addEventListener("click", onClick);
+  return node;
+}
+
 function drawFilters() {
   filters.replaceChildren();
+  if (like) {
+    const what = reference ? reference.label || reference.file_name : `scene ${like}`;
+    filters.append(
+      chip(`like ${what} ✕`, "Stop ranking against that scene", () => {
+        clearLike();
+        rerunOrClear();
+      }),
+    );
+  }
   for (const name of active) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip active";
-    chip.textContent = `${name} ✕`;
-    chip.title = `Stop filtering on ${name}`;
-    chip.addEventListener("click", () => removePerson(name));
-    filters.append(chip);
+    filters.append(chip(`${name} ✕`, `Stop filtering on ${name}`, () => removePerson(name)));
   }
 }
 
@@ -94,6 +135,7 @@ function searchParams() {
   const params = new URLSearchParams();
   const query = box.value.trim();
   if (query) params.set("q", query);
+  if (like) params.set("like", String(like));
   for (const name of active) params.append("person", name);
   return params;
 }
@@ -122,12 +164,17 @@ async function run(push = true) {
 function describe(data) {
   const parts = [];
   if (data.query.trim()) parts.push(`for “${data.query.trim()}”`);
+  if (data.like) parts.push(`like “${data.like.label || `scene ${data.like.scene_index}`}” in ${data.like.file_name}`);
   if (data.people.length) parts.push(`with ${data.people.join(" and ")}`);
   return parts.join(" ");
 }
 
 function render(data) {
   results.replaceChildren();
+  if (data.like) {
+    reference = data.like;
+    drawFilters();
+  }
   const what = describe(data);
   if (!data.hits.length) {
     hint.textContent = `Nothing matched ${what}. Try fewer words, or index more videos.`;
@@ -166,25 +213,34 @@ function card(hit) {
     const chips = document.createElement("div");
     chips.className = "chips";
     for (const person of hit.people) {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "chip";
-      chip.textContent = person;
-      chip.title = `Only scenes with ${person}`;
-      chip.addEventListener("click", () => addPerson(person));
-      chips.append(chip);
+      const node = document.createElement("button");
+      node.type = "button";
+      node.className = "chip";
+      node.textContent = person;
+      node.title = `Only scenes with ${person}`;
+      node.addEventListener("click", () => addPerson(person));
+      chips.append(node);
     }
     body.append(chips);
   }
 
   if (hit.transcript) body.append(text("div", "said", `“${hit.transcript}”`));
 
+  const links = document.createElement("div");
+  links.className = "links";
   const link = document.createElement("a");
   link.href = hit.immich_url;
   link.target = "_blank";
   link.rel = "noopener";
   link.textContent = `Open in Immich at ${hit.timestamp}`;
-  body.append(link);
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "more";
+  more.textContent = "more like this";
+  more.title = "Scenes that look like this one";
+  more.addEventListener("click", () => showLike(hit));
+  links.append(link, more);
+  body.append(links);
 
   node.append(body);
   return node;

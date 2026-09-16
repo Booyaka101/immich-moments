@@ -160,8 +160,14 @@ def test_a_person_filter_narrows_the_hits(client: TestClient) -> None:
     assert body["people"] == ["Anna"]
     assert [hit["scene_index"] for hit in body["hits"]] == [1]
 
-    nobody = client.get("/api/search", params={"q": "candles", "person": "Nobody"}).json()
-    assert nobody["count"] == 0
+
+def test_a_person_the_index_does_not_know_is_a_400_not_an_empty_page(client: TestClient) -> None:
+    """A hand-edited URL should say the name is unknown rather than look like no matches."""
+    response = client.get("/api/search", params={"q": "candles", "person": "Nobody"})
+
+    assert response.status_code == 400
+    assert "Nobody" in response.json()["detail"]
+    assert "Anna" in response.json()["detail"]
 
 
 def test_a_person_with_no_query_browses_that_person(client: TestClient) -> None:
@@ -169,6 +175,29 @@ def test_a_person_with_no_query_browses_that_person(client: TestClient) -> None:
     assert body["count"] == 1
     assert body["hits"][0]["scene_index"] == 1
     assert body["hits"][0]["file_created_at"] == "2026-06-01T00:00:00Z"
+
+
+def test_more_like_this_ranks_against_one_scene(client: TestClient) -> None:
+    candles = client.get("/api/search", params={"q": "candles"}).json()["hits"][0]
+
+    body = client.get("/api/search", params={"like": candles["scene_id"], "limit": 5}).json()
+
+    assert body["like"]["scene_id"] == candles["scene_id"]
+    assert body["like"]["label"] == "blowing out candles"
+    assert [hit["scene_index"] for hit in body["hits"]] == [0]
+    assert body["hits"][0]["score"] == body["hits"][0]["visual_score"]
+
+
+def test_a_query_and_a_scene_to_rank_against_is_a_400(client: TestClient) -> None:
+    response = client.get("/api/search", params={"q": "candles", "like": 1})
+    assert response.status_code == 400
+    assert "no query" in response.json()["detail"]
+
+
+def test_a_scene_id_that_is_not_indexed_is_a_400(client: TestClient) -> None:
+    response = client.get("/api/search", params={"like": 9999})
+    assert response.status_code == 400
+    assert "9999" in response.json()["detail"]
 
 
 def test_the_people_endpoint_lists_who_the_index_knows(client: TestClient) -> None:

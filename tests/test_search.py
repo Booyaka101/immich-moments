@@ -13,8 +13,9 @@ import numpy as np
 import pytest
 
 from immich_moments.config import Config
+from immich_moments.errors import ConfigError
 from immich_moments.ml import MLClient
-from immich_moments.search import Filters, browse, format_timestamp, fts_query, search
+from immich_moments.search import Filters, browse, format_timestamp, fts_query, search, similar
 from immich_moments.store import FaceRecord, SceneRecord, Store, TranscriptRecord, VectorFile
 
 from conftest import unit
@@ -357,3 +358,51 @@ def test_two_people_means_both_of_them_in_the_same_scene(seeded: Store) -> None:
     """Anna and Tom share scene 1; nobody shares a scene with a name that is not there."""
     assert [hit.scene_index for hit in browse(seeded, Filters(people=("Anna", "Tom")))] == [1]
     assert browse(seeded, Filters(people=("Anna", "Ruth"))) == []
+
+
+def scene_ids(store: Store) -> dict[str, int]:
+    """Scene id by label, because the ids themselves depend on insertion order."""
+    rows = [*store.scenes_for("birthday"), *store.scenes_for("garden")]
+    return {row["label"]: row["id"] for row in rows}
+
+
+def test_more_like_this_ranks_the_nearest_vectors_first(seeded: Store) -> None:
+    ids = scene_ids(seeded)
+    others = {"birthday cake": CAKE, "a table": TABLE, "a garden": GARDEN}
+    expected = [ids[label] for label in sorted(others, key=lambda k: -float(CANDLES @ others[k]))]
+
+    reference, hits = similar(seeded, ids["blowing out candles"], limit=5)
+
+    assert reference.scene_id == ids["blowing out candles"]
+    assert reference.label == "blowing out candles"
+    assert [hit.scene_id for hit in hits] == expected
+    assert hits[0].score == pytest.approx(float(CANDLES @ others[hits[0].label]), abs=1e-6)
+
+
+def test_more_like_this_never_returns_the_scene_you_asked_about(seeded: Store) -> None:
+    ids = scene_ids(seeded)
+
+    _reference, hits = similar(seeded, ids["a garden"], limit=10)
+
+    assert len(hits) == 3
+    assert ids["a garden"] not in [hit.scene_id for hit in hits]
+
+
+def test_more_like_this_obeys_the_limit(seeded: Store) -> None:
+    _reference, hits = similar(seeded, scene_ids(seeded)["a garden"], limit=2)
+    assert len(hits) == 2
+
+
+def test_more_like_this_can_be_narrowed_to_a_person(seeded: Store) -> None:
+    """Only the reference scene has Anna in it, so the honest answer is nothing else."""
+    ids = scene_ids(seeded)
+
+    reference, hits = similar(seeded, ids["a garden"], filters=Filters(people=("Anna",)))
+
+    assert reference.label == "a garden"
+    assert [hit.label for hit in hits] == ["blowing out candles"]
+
+
+def test_a_scene_that_is_not_there_says_so(seeded: Store) -> None:
+    with pytest.raises(ConfigError, match="not in the index"):
+        similar(seeded, 9999)

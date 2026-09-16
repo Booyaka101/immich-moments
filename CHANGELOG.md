@@ -35,6 +35,9 @@ First release.
 - `relabel`: tries a different vocabulary against the vectors already in the index, so it
   costs one embedding pass over the word list instead of another pass over the videos.
   `--dry-run` shows what would move.
+- `search --like SCENE_ID`, and "more like this" on every card in the UI: ranks the index
+  against one scene's vector instead of a query. Filters still apply, and the score is a
+  plain cosine rather than the blended one.
 - Configuration from environment variables or an `immich-moments.toml`.
 - A Docker image and a compose snippet that sits beside an existing Immich stack.
 

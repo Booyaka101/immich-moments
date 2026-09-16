@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .errors import ConfigError
 from .ml import MLClient
 from .store import Store
 
@@ -44,6 +45,21 @@ class Filters:
             )
             params.append(name.strip().lower())
         return "".join(f" AND {clause}" for clause in clauses), params
+
+
+def resolve_people(store: Store, wanted: Iterable[str]) -> list[str]:
+    """Names as the index spells them, so a typo is an error instead of an empty result.
+
+    SQLite's lower() is ASCII only, which is the other reason not to send a typed name straight
+    into the filter.
+    """
+    known = {row["name"].lower(): row["name"] for row in store.people_in_index()}
+    cleaned = [name.strip() for name in wanted if name.strip()]
+    missing = [name for name in cleaned if name.lower() not in known]
+    if missing:
+        have = ", ".join(sorted(known.values())) or "nobody yet"
+        raise ConfigError(f"no indexed scenes name {', '.join(missing)}. Indexed people: {have}")
+    return [known[name.lower()] for name in cleaned]
 
 
 @dataclass(slots=True)
@@ -168,26 +184,59 @@ def browse(store: Store, filters: Filters, *, limit: int = 20) -> list[Hit]:
     return _hydrate(store, [(int(row["id"]), 0.0) for row in rows], {}, {})
 
 
-def _visual_scores(store: Store, ml: MLClient, query: str, filters: Filters) -> dict[int, float]:
-    dim_state = store.get_state("vector_dim")
-    if dim_state is None:
-        return {}
+def _candidates(store: Store, filters: Filters) -> tuple[np.ndarray, np.ndarray]:
+    """Scene ids the filters allow, and the vectors that go with them, in id order."""
+    if store.get_state("vector_dim") is None:
+        return np.empty(0, dtype=np.int64), np.empty((0, 0), dtype=np.float32)
     vectors = store.vectors().read_all()
     if vectors.size == 0:
-        return {}
+        return np.empty(0, dtype=np.int64), np.empty((0, 0), dtype=np.float32)
 
     where, params = filters.sql("asset_id", "id")
     rows = store.db.execute(
-        f"SELECT id, vector_row FROM scenes WHERE vector_row IS NOT NULL{where}",  # noqa: S608
+        f"SELECT id, vector_row FROM scenes WHERE vector_row IS NOT NULL{where} ORDER BY id",  # noqa: S608
         params,
     ).fetchall()
     usable = [(r["id"], r["vector_row"]) for r in rows if r["vector_row"] < vectors.shape[0]]
     if not usable:
-        return {}
+        return np.empty(0, dtype=np.int64), np.empty((0, 0), dtype=np.float32)
+    scene_ids = np.array([scene_id for scene_id, _ in usable], dtype=np.int64)
+    return scene_ids, vectors[np.array([row for _, row in usable])]
 
-    embedding = ml.embed_text(query)
-    scene_ids = np.array([scene_id for scene_id, _ in usable])
-    scores = vectors[np.array([row for _, row in usable])] @ embedding
+
+def similar(
+    store: Store, scene_id: int, *, limit: int = 20, filters: Filters = Filters()
+) -> tuple[Hit, list[Hit]]:
+    """The scene itself and the scenes whose CLIP vector is nearest to it.
+
+    The score here is a plain cosine between two scene vectors, not the blended score a query
+    produces: there is no query to calibrate it against.
+    """
+    row = store.db.execute("SELECT vector_row FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+    if row is None or row["vector_row"] is None:
+        raise ConfigError(f"scene {scene_id} is not in the index, or was indexed without a vector.")
+    vectors = store.vectors().read_all()
+    if row["vector_row"] >= vectors.shape[0]:
+        raise ConfigError(f"scene {scene_id} points past the end of the vector file.")
+    reference = _hydrate(store, [(scene_id, 1.0)], {scene_id: 1.0}, {})[0]
+
+    scene_ids, matrix = _candidates(store, filters)
+    if scene_ids.size == 0:
+        return reference, []
+    scores = matrix @ vectors[row["vector_row"]]
+    ranked = [
+        (int(scene_ids[i]), float(scores[i]))
+        for i in np.argsort(-scores, kind="stable")[: limit + 1]
+        if int(scene_ids[i]) != scene_id
+    ][:limit]
+    return reference, _hydrate(store, ranked, dict(ranked), {})
+
+
+def _visual_scores(store: Store, ml: MLClient, query: str, filters: Filters) -> dict[int, float]:
+    scene_ids, matrix = _candidates(store, filters)
+    if scene_ids.size == 0:
+        return {}
+    scores = matrix @ ml.embed_text(query)
     top = np.argsort(-scores)[:CANDIDATES]
     return {int(scene_ids[i]): float(scores[i]) for i in top}
 

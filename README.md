@@ -241,7 +241,33 @@ http://localhost:2283/photos/d625e56a-0254-4d24-ac08-d3cf2d297931
 ```
 
 A name that no indexed scene carries is an error naming the people that are indexed, because
-a typo otherwise looks exactly like a person who happens to be in no video.
+a typo otherwise looks exactly like a person who happens to be in no video. The web API answers
+the same sentence with a 400, and whatever case you type is resolved to the spelling the index
+uses before it reaches the filter.
+
+`--like SCENE_ID` drops the query and ranks by picture alone against one scene you already
+found, which is how you get the rest of a moment the words never mention. Scene ids come from
+`--json` or the web API. The score is a plain cosine between two scene vectors, not the blended
+score a query produces, so the column says so.
+
+```
+$ immich-moments search --like 103 --limit 4
+                     4 scene(s) like 'a train passing' in mothersday-ep11.mp4                      
+┌────────┬───────┬─────────────────────┬────────────────────────┬────────┬────────────────────────┐
+│ cosine │    at │ video               │ scene                  │ people │ said                   │
+├────────┼───────┼─────────────────────┼────────────────────────┼────────┼────────────────────────┤
+│  0.984 │ 01:08 │ mothersday-ep11.mp4 │ a train passing        │ -      │                        │
+│  0.844 │ 00:27 │ mothersday-ep11.mp4 │ a train passing        │ -      │                        │
+│  0.823 │ 00:21 │ mothersday-ep13.mp4 │ a dark indoor scene    │ -      │                        │
+│  0.810 │ 00:49 │ mothersday-ep14.mp4 │ a person talking to    │ -      │ I was with him the     │
+│        │       │                     │ camera                 │        │ whole night, from      │
+│        │       │                     │                        │        │ after suns…            │
+└────────┴───────┴─────────────────────┴────────────────────────┴────────┴────────────────────────┘
+http://localhost:2283/photos/d625e56a-0254-4d24-ac08-d3cf2d297931
+```
+
+Filters still apply, so `--like 103 --person Martin` is "more of this, but only where Martin is".
+In the UI every result card has a "more like this" link that does the same thing.
 
 `--json` prints the same hits as the web API does, for piping into something else. `thumb` is
 the path `serve` exposes; the file itself is that name under `$DATA_DIR/thumbs`.
@@ -320,8 +346,9 @@ immich-moments on http://127.0.0.1:8099
 
 One page, one search box, a slider for the blend, thumbnails, and a link into Immich for every
 scene. The `who` menu lists the people the index knows and how many scenes each is in, and the
-name under any result filters on that person when you click it. The query and the filters live
-in the URL, so a search is a link you can keep.
+name under any result filters on that person when you click it. "more like this" on a card ranks
+the whole index against that scene's picture. The query, the filters and the scene being ranked
+against all live in the URL, so a search is a link you can keep.
 
 ### write it back into Immich
 

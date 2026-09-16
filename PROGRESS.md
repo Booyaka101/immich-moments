@@ -34,7 +34,7 @@ footage, 8 named people.
 | clean wheel install | `immich-moments doctor` and `search` work from a fresh venv |
 | Docker image | builds, runs, `doctor` passes on Immich's own compose network |
 
-Test suite: 218 passed, including the two slow tests that really run Whisper. The fast subset
+Test suite: 229 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Known limits, written down rather than hidden
@@ -83,6 +83,9 @@ them was believed.
   relative to whatever was searched, so a filtered search rescales against what the filter
   left rather than against the whole library.
 - `search --json`, sharing one serialiser with the web API so the two shapes cannot drift.
+- `search --like SCENE_ID` and "more like this" in the UI, ranking against one scene's vector
+  rather than a query. It shares the candidate selection with the visual channel, so the
+  filters and the missing-vector handling are the same code.
 - `relabel`, which re-scores the stored vectors against a new vocabulary. On the 16-video
   index the default vocabulary changes nothing, which is the check that the labels on disk
   still match the vectors they came from. A real run against a copy moved 209 of 210 scenes

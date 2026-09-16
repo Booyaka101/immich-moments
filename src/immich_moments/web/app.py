@@ -15,11 +15,12 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from ..config import Config
-from ..errors import MomentsError
+from ..errors import ConfigError, MomentsError
 from ..immich import ImmichClient
 from ..ml import MLClient
-from ..search import Filters
+from ..search import Filters, resolve_people
 from ..search import search as run_search
+from ..search import similar as run_similar
 from ..store import Store
 
 log = logging.getLogger(__name__)
@@ -90,26 +91,40 @@ def create_app(
         weight: float | None = Query(None, ge=0.0, le=1.0),
         asset: str | None = Query(None),
         person: list[str] = Query([], description="Only scenes this person appears in."),
+        like: int | None = Query(None, description="Scene id to find more of, instead of a query."),
     ):
         state = request.app.state
-        filters = Filters(asset_id=asset, people=tuple(name for name in person if name.strip()))
-        if not q.strip() and not filters:
+        if like is not None and q.strip():
+            raise HTTPException(status_code=400, detail="like ranks against one scene, so it takes no query")
+        if like is None and not q.strip() and not person and not asset:
             raise HTTPException(status_code=400, detail="give me a query, or a person to browse")
         # A search is an HTTP call to the ML container and then SQLite, both blocking. On the event
         # loop it would freeze the page and every thumbnail behind one query.
+        reference = None
         async with state.searching:
-            hits = await run_in_threadpool(
-                run_search,
-                state.store,
-                state.ml,
-                q,
-                limit=limit,
-                visual_weight=config.visual_weight if weight is None else weight,
-                filters=filters,
-            )
+            try:
+                people = await run_in_threadpool(resolve_people, state.store, person)
+                filters = Filters(asset_id=asset, people=tuple(people))
+                if like is not None:
+                    reference, hits = await run_in_threadpool(
+                        run_similar, state.store, like, limit=limit, filters=filters
+                    )
+                else:
+                    hits = await run_in_threadpool(
+                        run_search,
+                        state.store,
+                        state.ml,
+                        q,
+                        limit=limit,
+                        visual_weight=config.visual_weight if weight is None else weight,
+                        filters=filters,
+                    )
+            except ConfigError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             "query": q,
-            "people": list(filters.people),
+            "people": people,
+            "like": reference.as_dict(config.immich_url) if reference else None,
             "weight": config.visual_weight if weight is None else weight,
             "count": len(hits),
             "hits": [hit.as_dict(config.immich_url) for hit in hits],
@@ -127,7 +142,7 @@ def create_app(
 
 async def _stats(app: FastAPI) -> dict:
     async with app.state.searching:
-        counts = app.state.store.counts()
+        counts = await run_in_threadpool(app.state.store.counts)
     return {
         "assets": counts["assets"],
         "scenes": counts["scenes"],
