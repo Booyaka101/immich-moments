@@ -68,7 +68,7 @@ Immich's own compose file:
 ```yaml
 services:
   immich-moments:
-    image: ghcr.io/cbosch101/immich-moments:1.0.0
+    image: ghcr.io/booyaka101/immich-moments:1.0.0
     environment:
       IMMICH_URL: http://immich-server:2283
       IMMICH_API_KEY: ${IMMICH_API_KEY}
@@ -345,7 +345,7 @@ visual_weight = 0.5
 ## Development
 
 ```
-git clone https://github.com/cbosch101/immich-moments
+git clone https://github.com/Booyaka101/immich-moments
 cd immich-moments
 pip install -e ".[dev]"
 pytest -m "not slow and not live"

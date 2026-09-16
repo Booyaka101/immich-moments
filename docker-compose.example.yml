@@ -12,7 +12,7 @@
 services:
   immich-moments:
     container_name: immich_moments
-    image: ghcr.io/cbosch101/immich-moments:1.0.0
+    image: ghcr.io/booyaka101/immich-moments:1.0.0
     environment:
       IMMICH_URL: http://immich-server:2283
       IMMICH_API_KEY: ${IMMICH_API_KEY}
@@ -30,7 +30,7 @@ services:
     restart: always
 
     # GPU transcription: use the -cuda image tag and uncomment.
-    # image: ghcr.io/cbosch101/immich-moments:1.0.0-cuda
+    # image: ghcr.io/booyaka101/immich-moments:1.0.0-cuda
     # deploy:
     #   resources:
     #     reservations:

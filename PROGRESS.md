@@ -25,6 +25,7 @@ footage, 8 named people.
 | per-phase timings | discover 0.0s, people 1.8s, visual 500.5s, speech 20.8s |
 | determinism | a second full index reproduced 210 scenes and 118 segments exactly |
 | three hand-written queries | correct video and moment for all three, at the default weight |
+| timestamp accuracy | 1.2s, 1.0s and 0s off the true moment, checked against the frame and a separate transcription of the raw audio, not against the index |
 | `--write-back --dry-run` | 16 assets planned, zero write requests sent |
 | real `--write-back` | 7 tags, 7 links, 16 descriptions |
 | second `--write-back` | nothing to change |
@@ -33,7 +34,8 @@ footage, 8 named people.
 | clean wheel install | `immich-moments doctor` and `search` work from a fresh venv |
 | Docker image | builds, runs, `doctor` passes on Immich's own compose network |
 
-Test suite: 184 passed, including the two slow tests that really run Whisper.
+Test suite: 184 passed, including the two slow tests that really run Whisper. The fast subset
+also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Known limits, written down rather than hidden
 
@@ -63,6 +65,9 @@ Kept out of 1.0 deliberately. Each is a real want, none is needed to ship.
 - Incremental re-labelling when `--labels` changes, without a full reindex.
 - Album and person filters in the UI. The store already carries the data.
 - A relevance test set, so the blend weight could be tuned rather than argued.
+- A score floor, so a query nothing matches prints nothing instead of the library's best
+  guess at 0.25. The score column already says so, and a badly chosen floor would hide real
+  speech-led hits, which land near 0.35.
 
 ## Distribution
 
