@@ -445,3 +445,62 @@ def test_a_reader_that_hung_up_is_not_a_disk_error(monkeypatch: pytest.MonkeyPat
     assert not cli_module._reader_hung_up(OSError(errno.EINVAL, "Invalid argument"))
     monkeypatch.setattr(sys, "stdout", _DeadPipe())
     assert cli_module._reader_hung_up(OSError(errno.EINVAL, "Invalid argument"))
+
+
+def canned_search(monkeypatch: pytest.MonkeyPatch, visual_score: float, floor: float | None) -> None:
+    """One hit at a known cosine against a known reference, which is all the note turns on."""
+    hit = Hit(
+        scene_id=1,
+        asset_id="a1",
+        original_file_name="clip.mp4",
+        scene_index=0,
+        file_created_at="2026-06-01T00:00:00Z",
+        start_seconds=0.0,
+        end_seconds=10.0,
+        label="a dark indoor scene",
+        label_score=0.9,
+        thumb_path=None,
+        visual_score=visual_score,
+        text_score=0.0,
+        score=0.5,
+    )
+    monkeypatch.setattr("immich_moments.cli.run_search", lambda *_args, **_kw: [hit])
+    monkeypatch.setattr("immich_moments.cli.visual_reference", lambda *_args: floor)
+
+
+def test_a_query_with_no_answer_says_so_above_the_results(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
+) -> None:
+    """Ranking always has a top, so a full page is not on its own evidence of a match."""
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden"])
+    canned_search(monkeypatch, visual_score=0.02, floor=0.0377)
+
+    code, _ = run("search", "a dog", monkeypatch=monkeypatch)
+
+    assert code == 0
+    assert "Nothing in your library looks much like that" in capsys.readouterr().out
+
+
+def test_a_query_with_an_answer_says_nothing_extra(monkeypatch: pytest.MonkeyPatch, capsys, tmp_path) -> None:
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden"])
+    canned_search(monkeypatch, visual_score=0.15, floor=0.0377)
+
+    code, _ = run("search", "a train", monkeypatch=monkeypatch)
+
+    assert code == 0
+    assert "looks much like that" not in capsys.readouterr().out
+
+
+def test_a_library_too_empty_to_measure_makes_no_claim(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
+) -> None:
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden"])
+    canned_search(monkeypatch, visual_score=0.0, floor=None)
+
+    code, _ = run("search", "a dog", monkeypatch=monkeypatch)
+
+    assert code == 0
+    assert "looks much like that" not in capsys.readouterr().out

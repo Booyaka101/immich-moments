@@ -72,7 +72,7 @@ Immich's own compose file:
 ```yaml
 services:
   immich-moments:
-    image: ghcr.io/booyaka101/immich-moments:1.1.1
+    image: ghcr.io/booyaka101/immich-moments:1.2.0
     environment:
       IMMICH_URL: http://immich-server:2283
       IMMICH_PUBLIC_URL: http://localhost:2283   # where your browser reaches Immich
@@ -287,6 +287,27 @@ http://localhost:2283/photos/8ae3a967-18b5-4626-b30c-f92e9ec13e9c
 Both of those are speech hits at the default weight. The timestamp is where the words were
 said when speech decided the hit, and where the cut is when the picture did. `--asset <id>`
 searches inside one video.
+
+Ask for something that is not in there and you still get results, because ranking always has a
+top. It says so:
+
+```
+$ immich-moments search "a dog" --limit 2
+Nothing in your library looks much like that. These are the closest scenes to it, which is not
+the same as a match.
+                                    2 scene(s) for 'a dog'
+┌───────┬───────┬─────────────────────┬────────────────────┬───────────────┬────────────────────┐
+│ score │    at │ video               │ scene              │ people        │ said               │
+├───────┼───────┼─────────────────────┼────────────────────┼───────────────┼────────────────────┤
+│ 0.533 │ 01:00 │ mothersday-ep11.mp4 │ a dark indoor      │ Martin, Elena │ That's a good      │
+│       │       │                     │ scene              │               │ thing to remember… │
+│ 0.381 │ 00:59 │ mothersday-ep14.mp4 │ a dark indoor      │ Nadia         │ He told me a       │
+│       │       │                     │ scene              │               │ story about…       │
+└───────┴───────┴─────────────────────┴────────────────────┴───────────────┴────────────────────┘
+```
+
+Note 0.533 there against 0.976 for the train. The score is a rank within your library, not a
+probability that the thing is in it, which is why the note exists at all.
 
 `--weight` is the blend: 1 is vision only, 0 is speech only, the default is 0.65. Pull it down
 towards 0.3 when you want the transcript to decide.
@@ -579,9 +600,10 @@ A video trashed since it was indexed is skipped and named in the output rather t
 the run; `index --prune` is what takes it out of the index.
 
 That is the endpoint behind the Description field in Immich's own search filters, so the same
-words typed into Immich find the video. Immich's smart search does not: the same query through
-`/api/search/smart` returns 15 unrelated videos, because it only ever saw one thumbnail per
-file. The `moments/people/` and `moments/scene/` tags show up in Immich's tag browser as well.
+words typed into Immich find the video, and only that video. Immich's smart search does not
+sort it out: the same query through `/api/search/smart` hands back all 16 videos in the library
+with the right one eighth, because it only ever saw one thumbnail per file and no audio at all.
+The `moments/people/` and `moments/scene/` tags show up in Immich's tag browser as well.
 
 ## Configuration
 
@@ -592,7 +614,6 @@ command line flag wins over both.
 | Setting | Variable | Default | What it does |
 |---|---|---|---|
 | `immich_url` | `IMMICH_URL` | none | Your Immich server |
-
 | `immich_public_url` | `IMMICH_PUBLIC_URL` | `immich_url` | Where your browser reaches Immich, if that is not the same address |
 | `immich_api_key` | `IMMICH_API_KEY` | none | API key from Account Settings |
 | `ml_url` | `IMMICH_ML_URL` | `http://localhost:3003` | Immich's ML container |
@@ -647,10 +668,16 @@ full disk.
    vector database, nothing to run.
 7. A query is embedded once, scored against every scene vector by cosine, and blended with the
    BM25 score of the transcript. The two channels are normalised separately. The visual score
-   is the cosine margin over the library average for that query, in cosine units, so a query
-   with nothing to look at scores low instead of crowning whichever scene happened to come
-   closest. The text score is scaled against the best match, because BM25 has no absolute
-   meaning and the weakest match still matched.
+   is the cosine margin over the library average for that query, in cosine units, which cancels
+   the per-query offset that makes raw CLIP cosines incomparable between queries. The text score
+   is scaled against the best match, because BM25 has no absolute meaning and the weakest match
+   still matched.
+8. Ranking always returns something, so before showing results it measures what your library
+   pays a query it has no answer for: twenty mundane phrases nobody films, and the 90th
+   percentile of the best cosine each one gets. A query that does not beat that is answered
+   with "nothing looks much like that" above the results. That number is a property of your
+   library and your CLIP model, not a constant, and it is measured once and kept until the
+   library or the model changes.
 
 ## Limitations
 
@@ -666,6 +693,12 @@ full disk.
   but if you want the transcript to lead, `--weight 0.3` or the slider in the UI does it.
 - The blend is a weighted sum of two separately normalised channels with no relevance
   judgements behind it. It is tuned to be defensible, not optimal.
+- A search is a ranking, not a filter, so there is always a top result. Ask for something you
+  have never filmed and you still get a full page of the closest scenes. The "nothing looks
+  much like that" note is the honest warning about this and it is a hint, not a verdict: over
+  28 queries on a 211 scene library it was right about 10 of the 12 that had an answer and 13
+  of the 16 that did not. Nothing is ever hidden on the strength of it, because at every
+  threshold that catches the queries with no answer, real ones go with them.
 - Whisper transcribes, it does not diarise. The transcript does not say who spoke.
 - Write-back only touches tags under `moments/` and the fenced block. It will not remove tags
   for things you later drop from the index.

@@ -279,6 +279,7 @@ function describe(data) {
 
 function render(data) {
   results.replaceChildren();
+  hint.classList.toggle("weak", Boolean(data.nothing_close));
   if (data.like) {
     reference = data.like;
     drawFilters();
@@ -293,7 +294,9 @@ function render(data) {
     results.append(panel);
     return;
   }
-  hint.textContent = `${data.count} scene${data.count === 1 ? "" : "s"} ${what}`;
+  hint.textContent = data.nothing_close
+    ? `Nothing looks much like that. Closest ${data.count} scene${data.count === 1 ? "" : "s"} ${what}.`
+    : `${data.count} scene${data.count === 1 ? "" : "s"} ${what}`;
   for (const hit of data.hits) results.append(card(hit));
 }
 
