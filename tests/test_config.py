@@ -143,6 +143,33 @@ def test_api_base_tolerates_a_trailing_slash() -> None:
     assert Config(immich_url="http://host:2283/").api_base == "http://host:2283/api"
 
 
+def test_the_browser_link_falls_back_to_the_api_url() -> None:
+    assert Config(immich_url="http://host:2283/").browser_url == "http://host:2283"
+
+
+def test_a_public_url_overrides_the_api_url_for_links() -> None:
+    """Beside Immich in compose the API is a service name and the link has to be the real one."""
+    config = Config(immich_url="http://immich-server:2283", immich_public_url="http://nas:2283/")
+    assert config.browser_url == "http://nas:2283"
+    assert config.api_base == "http://immich-server:2283/api"
+
+
+@pytest.mark.parametrize(
+    ("url", "internal"),
+    [
+        ("http://immich-server:2283", True),
+        ("http://immich_server:2283", True),
+        ("http://localhost:2283", False),
+        ("http://192.168.1.4:2283", False),
+        ("http://photos.example.com", False),
+        ("", False),
+    ],
+)
+def test_a_link_only_the_container_network_can_follow_is_recognised(url: str, internal: bool) -> None:
+    """A dead "Open in Immich" is the whole compose setup the README recommends."""
+    assert Config(immich_url=url).browser_url_is_internal is internal
+
+
 def test_missing_credentials_say_what_to_set() -> None:
     with pytest.raises(ConfigError, match="IMMICH_URL is not set"):
         Config().require_credentials()

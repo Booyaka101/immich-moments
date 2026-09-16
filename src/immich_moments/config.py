@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .errors import ConfigError
 
@@ -31,6 +33,7 @@ RENAMED = {
 @dataclass(slots=True)
 class Config:
     immich_url: str = ""
+    immich_public_url: str = ""
     immich_api_key: str = ""
     ml_url: str = DEFAULT_ML_URL
     data_dir: Path = DEFAULT_DATA_DIR
@@ -84,6 +87,23 @@ class Config:
     @property
     def api_base(self) -> str:
         return self.immich_url.rstrip("/") + "/api"
+
+    @property
+    def browser_url(self) -> str:
+        """Where to send a browser, which beside Immich in compose is not where the API is."""
+        return (self.immich_public_url or self.immich_url).rstrip("/")
+
+    @property
+    def browser_url_is_internal(self) -> bool:
+        """True when the link would only resolve inside the container network."""
+        host = urlparse(self.browser_url).hostname or ""
+        if not host or host == "localhost" or "." in host or ":" in host:
+            return False
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            return True
+        return False
 
     def require_credentials(self) -> None:
         if not self.immich_url:
@@ -164,6 +184,7 @@ def load_config(config_path: Path | None = None, overrides: dict[str, object] | 
 
     env_map = {
         "immich_url": "IMMICH_URL",
+        "immich_public_url": "IMMICH_PUBLIC_URL",
         "immich_api_key": "IMMICH_API_KEY",
         "ml_url": "IMMICH_ML_URL",
         "data_dir": "DATA_DIR",

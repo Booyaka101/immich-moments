@@ -107,6 +107,14 @@ def doctor(
     with immich:
         version = immich.server_version()
         table.add_row("[green]OK[/]", "Immich API", f"{config.immich_url} ({version})")
+        if config.browser_url_is_internal:
+            table.add_row(
+                "[yellow]--[/]",
+                "Immich links",
+                f"{config.browser_url} resolves inside the container network, so "
+                "'Open in Immich' will not open in a browser. Set IMMICH_PUBLIC_URL to the "
+                "address you use, e.g. http://localhost:2283.",
+            )
 
         clip_model, face_model = immich.model_names()
         table.add_row("[green]OK[/]", "CLIP model", clip_model)
@@ -409,7 +417,7 @@ def search(
                 filters=filters,
             )
     if as_json:
-        console.print_json(json.dumps([hit.as_dict(config.immich_url) for hit in hits]))
+        console.print_json(json.dumps([hit.as_dict(config.browser_url) for hit in hits]))
         raise typer.Exit(0 if hits else 1)
     if not hits:
         what = _describe(query, filters, reference)
@@ -438,7 +446,7 @@ def search(
             escape(_shorten(hit.transcript, 48)),
         )
     console.print(table)
-    console.print(f"[dim]{hits[0].immich_url(config.immich_url)}[/]")
+    console.print(f"[dim]{hits[0].immich_url(config.browser_url)}[/]")
 
 
 def _describe(query: str, filters: Filters, reference: Hit | None = None) -> str:

@@ -12,9 +12,12 @@
 services:
   immich-moments:
     container_name: immich_moments
-    image: ghcr.io/booyaka101/immich-moments:1.1.0
+    image: ghcr.io/booyaka101/immich-moments:1.1.1
     environment:
       IMMICH_URL: http://immich-server:2283
+      # Where your browser reaches Immich. IMMICH_URL above is a service name, which resolves
+      # in here and nowhere a browser can follow, so without this every "Open in Immich" is dead.
+      IMMICH_PUBLIC_URL: http://localhost:2283
       IMMICH_API_KEY: ${IMMICH_API_KEY}
       IMMICH_ML_URL: http://immich-machine-learning:3003
       # Whisper on the CPU is roughly five times slower than real time on a small model.
@@ -30,7 +33,7 @@ services:
     restart: always
 
     # GPU transcription: use the -cuda image tag and uncomment.
-    # image: ghcr.io/booyaka101/immich-moments:1.1.0-cuda
+    # image: ghcr.io/booyaka101/immich-moments:1.1.1-cuda
     # deploy:
     #   resources:
     #     reservations:
