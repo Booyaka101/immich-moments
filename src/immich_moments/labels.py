@@ -42,12 +42,19 @@ class LabelIndex:
         self.min_similarity = min_similarity
 
     def best(self, vector: np.ndarray) -> tuple[str, float] | None:
-        if not self.labels:
-            return None
-        scores = self.matrix @ vector
-        best = int(np.argmax(scores))
-        score = float(scores[best])
-        return (self.labels[best], score) if score >= self.min_similarity else None
+        return self.best_many(vector.reshape(1, -1))[0]
+
+    def best_many(self, vectors: np.ndarray) -> list[tuple[str, float] | None]:
+        """Label a whole index in one matmul, which is what `relabel` needs."""
+        if not self.labels or vectors.size == 0:
+            return [None] * len(vectors)
+        scores = vectors @ self.matrix.T
+        winners = np.argmax(scores, axis=1)
+        tops = scores[np.arange(len(vectors)), winners]
+        return [
+            (self.labels[int(winner)], float(top)) if top >= self.min_similarity else None
+            for winner, top in zip(winners, tops, strict=True)
+        ]
 
 
 def build_label_index(

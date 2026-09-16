@@ -9,13 +9,19 @@ from __future__ import annotations
 import json
 import sys
 
+import numpy as np
 import pytest
 from typer.testing import CliRunner
 
 from immich_moments import __version__
 from immich_moments.cli import app, main
+from immich_moments.config import Config
 from immich_moments.errors import ConfigError, ImmichError, StorageError
+from immich_moments.labels import LabelIndex
 from immich_moments.search import Hit
+from immich_moments.store import SceneRecord, Store
+
+from conftest import unit
 
 runner = CliRunner()
 
@@ -189,3 +195,86 @@ def test_json_output_is_machine_readable(monkeypatch: pytest.MonkeyPatch, capsys
     assert payload == [hit.as_dict("http://immich.test")]
     assert payload[0]["timestamp"] == "00:10"
     assert payload[0]["immich_url"] == "http://immich.test/photos/a1"
+
+
+def seed_index(data_dir, labels) -> None:
+    """A two-scene index on disk, so `relabel` has real vectors to read back."""
+    config = Config(
+        immich_url="http://immich.test",
+        immich_api_key="key",
+        ml_url="http://ml.test",
+        data_dir=data_dir,
+    )
+    config.ensure_dirs()
+    with Store(config) as store:
+        store.check_model("ViT-B-32__openai", 8, reindex=False)
+        store.upsert_asset(
+            "a1",
+            original_file_name="a1.mp4",
+            file_created_at="2026-06-01T00:00:00Z",
+            updated_at="2026-06-01T00:00:00Z",
+            duration_seconds=30.0,
+        )
+        store.replace_scenes(
+            "a1",
+            [
+                SceneRecord(index, 0.0, 5.0, vector=unit(index), label=label, label_score=0.3)
+                for index, label in enumerate(labels)
+            ],
+            store.vectors(8),
+            indexed_at="2026-06-01T00:00:00Z",
+        )
+
+
+def stub_labels(monkeypatch: pytest.MonkeyPatch, *, wins: str) -> None:
+    """Every scene lands on one label, whatever its vector, so the diff is the thing under test."""
+    monkeypatch.setattr(
+        "immich_moments.cli.build_label_index",
+        lambda *_a, **_k: LabelIndex([wins], np.ones((1, 8), np.float32), min_similarity=-1.0),
+    )
+
+
+def test_relabelling_an_empty_index_says_to_index_first(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    stub_clients(monkeypatch)
+
+    code, _ = run("relabel", monkeypatch=monkeypatch)
+
+    assert code == 1
+    assert "index` first" in capsys.readouterr().out
+
+
+def test_a_dry_run_relabel_writes_nothing(monkeypatch: pytest.MonkeyPatch, capsys, tmp_path) -> None:
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden", "a garden"])
+    stub_labels(monkeypatch, wins="a birthday cake")
+
+    code, _ = run("relabel", "--dry-run", monkeypatch=monkeypatch)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "2 change(s)" in out
+    assert "nothing written" in out
+    assert labels_on_disk(tmp_path / "data") == ["a garden", "a garden"]
+
+
+def test_relabelling_rewrites_the_labels_that_moved(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
+) -> None:
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden", "a birthday cake"])
+    stub_labels(monkeypatch, wins="a birthday cake")
+
+    code, _ = run("relabel", monkeypatch=monkeypatch)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "1 change(s): 0 newly labelled, 0 cleared, 1 moved to another label" in out
+    assert labels_on_disk(tmp_path / "data") == ["a birthday cake", "a birthday cake"]
+
+
+def labels_on_disk(data_dir) -> list[str | None]:
+    config = Config(
+        immich_url="http://immich.test", immich_api_key="key", ml_url="http://ml.test", data_dir=data_dir
+    )
+    with Store(config) as store:
+        return [row["label"] for row in store.labelled_scenes()]

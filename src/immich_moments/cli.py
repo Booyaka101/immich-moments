@@ -20,6 +20,7 @@ from .errors import ConfigError, MomentsError, StorageError
 from .faces import pad_thumbnail
 from .immich import ImmichClient
 from .indexer import run_index
+from .labels import build_label_index
 from .ml import MLClient
 from .search import Filters
 from .search import search as run_search
@@ -216,6 +217,87 @@ def index(
 
         if write_back:
             _print_writeback(apply_write_back(store, immich, store.indexed_asset_ids(), dry_run=dry_run))
+
+
+@app.command()
+def relabel(
+    labels: Annotated[
+        Path | None, typer.Option("--labels", help="Custom scene label vocabulary, one per line.")
+    ] = None,
+    min_similarity: Annotated[
+        float | None, typer.Option("--min-similarity", help="Below this a scene gets no label.")
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Print what would change and write nothing.")
+    ] = False,
+    config_path: ConfigOption = None,
+    verbose: VerboseOption = False,
+) -> None:
+    """Re-label indexed scenes from a vocabulary, without fetching the videos again.
+
+    Labels are read off the scene vectors that are already in the index, so trying a different
+    vocabulary costs one embedding pass over the word list, not another pass over your library.
+    """
+    config = _setup(config_path, verbose)
+    immich, ml, clip_model, _face = _clients(config)
+    with immich, ml, Store(config) as store:
+        store.assert_model(clip_model)
+        scenes = store.labelled_scenes()
+        if not scenes:
+            console.print("[yellow]Nothing to re-label.[/] Run `immich-moments index` first.")
+            raise typer.Exit(1)
+
+        index = build_label_index(
+            ml,
+            config.data_dir,
+            labels_path=labels,
+            min_similarity=config.label_min_similarity if min_similarity is None else min_similarity,
+        )
+        vectors = store.vectors().read_all()
+        usable = [scene for scene in scenes if scene["vector_row"] < vectors.shape[0]]
+        picks = index.best_many(vectors[[scene["vector_row"] for scene in usable]])
+
+        changes = [
+            (scene["id"], scene["label"], pick)
+            for scene, pick in zip(usable, picks, strict=True)
+            if (pick[0] if pick else None) != scene["label"]
+        ]
+        _print_relabel(len(usable), picks, changes)
+        if dry_run:
+            console.print("[dim]--dry-run: nothing written.[/]")
+            return
+        store.set_labels(
+            [
+                (scene_id, pick[0] if pick else None, pick[1] if pick else None)
+                for scene_id, _old, pick in changes
+            ]
+        )
+        if changes:
+            console.print(
+                "[dim]Tags in Immich are not rewritten; write-back never removes a tag it added.[/]"
+            )
+
+
+def _print_relabel(total: int, picks: list, changes: list) -> None:
+    labelled = sum(1 for pick in picks if pick)
+    gained = sum(1 for _id, old, pick in changes if old is None)
+    lost = sum(1 for _id, old, pick in changes if pick is None)
+    console.print(
+        f"{total} scene(s) with vectors, {labelled} labelled, {total - labelled} below the threshold"
+    )
+    console.print(
+        f"{len(changes)} change(s): {gained} newly labelled, {lost} cleared, "
+        f"{len(changes) - gained - lost} moved to another label"
+    )
+    if not changes:
+        return
+    table = Table(title="first changes", header_style="bold")
+    table.add_column("was")
+    table.add_column("now")
+    table.add_column("score", justify="right")
+    for _id, old, pick in changes[:10]:
+        table.add_row(escape(old or "-"), escape(pick[0] if pick else "-"), f"{pick[1]:.3f}" if pick else "-")
+    console.print(table)
 
 
 @app.command()

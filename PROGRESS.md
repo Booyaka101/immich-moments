@@ -34,7 +34,7 @@ footage, 8 named people.
 | clean wheel install | `immich-moments doctor` and `search` work from a fresh venv |
 | Docker image | builds, runs, `doctor` passes on Immich's own compose network |
 
-Test suite: 195 passed, including the two slow tests that really run Whisper. The fast subset
+Test suite: 218 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Known limits, written down rather than hidden
@@ -77,6 +77,18 @@ them was believed.
   note that progress is checkpointed.
 - `--labels` kept lines whose comment marker was indented, so `  # like this` became a label.
 
+## Enhancements after the review round
+
+- `search --person NAME` and the who menu in the UI, both AND across names. Scores are
+  relative to whatever was searched, so a filtered search rescales against what the filter
+  left rather than against the whole library.
+- `search --json`, sharing one serialiser with the web API so the two shapes cannot drift.
+- `relabel`, which re-scores the stored vectors against a new vocabulary. On the 16-video
+  index the default vocabulary changes nothing, which is the check that the labels on disk
+  still match the vectors they came from. A real run against a copy moved 209 of 210 scenes
+  to a six-phrase vocabulary and back again, with every label identical afterwards and the
+  scores within float32 epsilon.
+
 ## Features considered and not built
 
 Kept out of 1.0 deliberately. Each is a real want, none is needed to ship.
@@ -86,7 +98,6 @@ Kept out of 1.0 deliberately. Each is a real want, none is needed to ship.
 - OCR over scene frames, for title cards and signs. Cheap to add with the same `/predict`
   plumbing, but a second model download.
 - A deep link into Immich at a timestamp. Immich has no such URL today.
-- Incremental re-labelling when `--labels` changes, without a full reindex.
 - Album filters. Albums are the one thing the index does not carry; person filters shipped
   because the faces were already there.
 - A relevance test set, so the blend weight could be tuned rather than argued.

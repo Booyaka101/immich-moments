@@ -273,6 +273,44 @@ $ immich-moments search "where did you get that tape" --limit 1 --json
 ]
 ```
 
+### relabel
+
+Scene labels come from a vocabulary, and the right vocabulary for your library is not the one
+shipped here. `relabel` tries a new one against the vectors already in the index, so it costs one
+embedding pass over the word list rather than another pass over every video.
+
+```
+$ immich-moments relabel --dry-run
+210 scene(s) with vectors, 209 labelled, 1 below the threshold
+0 change(s): 0 newly labelled, 0 cleared, 0 moved to another label
+--dry-run: nothing written.
+
+$ immich-moments relabel --labels smaller.txt --dry-run
+210 scene(s) with vectors, 168 labelled, 42 below the threshold
+209 change(s): 0 newly labelled, 41 cleared, 168 moved to another label
+                  first changes                   
+┌────────────────────────┬───────────────┬───────┐
+│ was                    │ now           │ score │
+├────────────────────────┼───────────────┼───────┤
+│ a black screen         │ the night sky │ 0.252 │
+│ a chess board          │ the night sky │ 0.251 │
+│ a title card with text │ -             │     - │
+│ a dj at a mixing desk  │ -             │     - │
+│ a black screen         │ the night sky │ 0.221 │
+│ a black screen         │ the night sky │ 0.220 │
+│ a black screen         │ -             │     - │
+│ a jigsaw puzzle        │ a train       │ 0.222 │
+│ a field of flowers     │ -             │     - │
+│ a jigsaw puzzle        │ -             │     - │
+└────────────────────────┴───────────────┴───────┘
+--dry-run: nothing written.
+```
+
+With the default vocabulary it is a no-op, which is also the cheapest check that the stored labels
+still match the stored vectors. `--dry-run` prints the same summary and writes nothing. Tags
+already written back to Immich are not rewritten: write-back never removes a tag it added, so old
+`moments/scene/...` tags stay until you take them off yourself.
+
 ### serve
 
 ```
@@ -423,7 +461,8 @@ full disk.
 ## Limitations
 
 - Scene labels come from a fixed vocabulary of about 120 English phrases
-  (`--labels your-own.txt` replaces it). They are a caption, not a classifier.
+  (`--labels your-own.txt` replaces it, and `relabel` swaps it without a reindex). They are a
+  caption, not a classifier.
 - Faces are matched against people you have already named in Immich. It will not find people
   Immich does not know, and it never creates or renames anyone.
 - The default weight of 0.65 favours vision. Speech-led queries still work at the default,

@@ -98,6 +98,31 @@ def test_an_empty_index_labels_nothing() -> None:
     assert LabelIndex([], np.zeros((0, DIM), np.float32), min_similarity=0.0).best(CAKE) is None
 
 
+def test_a_whole_batch_is_labelled_in_one_pass() -> None:
+    """`relabel` scores the entire index at once, so the batch must agree with `best`."""
+    index = LabelIndex(["a birthday cake", "a garden"], np.stack([CAKE, GARDEN]), min_similarity=0.2)
+
+    picks = index.best_many(np.stack([GARDEN, CAKE]))
+
+    assert [label for label, _score in picks] == ["a garden", "a birthday cake"]
+    assert picks[0] == index.best(GARDEN)
+
+
+def test_a_batch_keeps_the_weak_ones_unlabelled() -> None:
+    index = LabelIndex(["a birthday cake"], np.stack([CAKE]), min_similarity=0.9)
+
+    assert index.best_many(np.stack([CAKE, GARDEN])) == [
+        ("a birthday cake", pytest.approx(1.0, abs=1e-5)),
+        None,
+    ]
+
+
+def test_an_empty_batch_is_not_a_matmul_error() -> None:
+    index = LabelIndex(["a birthday cake"], np.stack([CAKE]), min_similarity=0.0)
+
+    assert index.best_many(np.zeros((0, DIM), np.float32)) == []
+
+
 def test_the_vocabulary_is_embedded_once_then_read_from_cache(
     config: Config, labels_file: Path, tmp_path: Path
 ) -> None:

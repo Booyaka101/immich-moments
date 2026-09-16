@@ -32,6 +32,9 @@ First release.
   prints the mutations and sends nothing.
 - Scene labels from a built-in vocabulary of zero-shot CLIP phrases, replaceable with
   `--labels`.
+- `relabel`: tries a different vocabulary against the vectors already in the index, so it
+  costs one embedding pass over the word list instead of another pass over the videos.
+  `--dry-run` shows what would move.
 - Configuration from environment variables or an `immich-moments.toml`.
 - A Docker image and a compose snippet that sits beside an existing Immich stack.
 

@@ -399,6 +399,22 @@ class Store:
     def scenes_for(self, asset_id: str) -> list[sqlite3.Row]:
         return self.db.execute("SELECT * FROM scenes WHERE asset_id = ? ORDER BY idx", (asset_id,)).fetchall()
 
+    def labelled_scenes(self) -> list[sqlite3.Row]:
+        """Every scene that has a vector, with the label it currently carries."""
+        return self.db.execute(
+            "SELECT id, vector_row, label FROM scenes WHERE vector_row IS NOT NULL ORDER BY vector_row"
+        ).fetchall()
+
+    def set_labels(self, labels: Sequence[tuple[int, str | None, float | None]]) -> None:
+        """Re-label scenes in place. The vectors they were derived from do not change."""
+        if not labels:
+            return
+        with self.transaction() as db:
+            db.executemany(
+                "UPDATE scenes SET label = ?, label_score = ? WHERE id = ?",
+                [(label, score, scene_id) for scene_id, label, score in labels],
+            )
+
     def faces_for_scenes(self, scene_ids: Sequence[int]) -> dict[int, list[sqlite3.Row]]:
         if not scene_ids:
             return {}

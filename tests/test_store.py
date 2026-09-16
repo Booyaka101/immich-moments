@@ -267,3 +267,35 @@ def test_a_failed_transaction_leaves_nothing_behind(store: Store, config: Config
         db.execute("DELETE FROM scenes")
         raise RuntimeError("something blew up mid-write")
     assert store.counts()["scenes"] == 1
+
+
+def test_relabelling_rewrites_the_label_and_leaves_the_vector_alone(store: Store, config: Config) -> None:
+    """`relabel` reads the vectors back, so a re-label must not disturb the rows they live in."""
+    seed_asset(store)
+    vectors = VectorFile(config.vectors_path, 8)
+    store.replace_scenes(
+        "a1",
+        [
+            SceneRecord(0, 0.0, 5.0, vector=unit(1), label="a garden", label_score=0.3),
+            SceneRecord(1, 5.0, 9.0, vector=unit(2)),
+            SceneRecord(2, 9.0, 12.0),
+        ],
+        vectors,
+        indexed_at=NOW,
+    )
+
+    listed = store.labelled_scenes()
+    assert [(row["vector_row"], row["label"]) for row in listed] == [(0, "a garden"), (1, None)]
+
+    store.set_labels([(listed[0]["id"], None, None), (listed[1]["id"], "a birthday cake", 0.42)])
+
+    after = store.labelled_scenes()
+    assert [(row["vector_row"], row["label"]) for row in after] == [(0, None), (1, "a birthday cake")]
+    assert [dict(row)["label_score"] for row in store.scenes_for("a1")][:2] == [None, 0.42]
+    np.testing.assert_allclose(VectorFile(config.vectors_path, 8).read_all()[1], unit(2), rtol=1e-6)
+
+
+def test_relabelling_nothing_is_not_a_write(store: Store) -> None:
+    seed_asset(store)
+    store.set_labels([])
+    assert store.labelled_scenes() == []
