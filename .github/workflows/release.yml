@@ -73,6 +73,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          # The explicit raw tag below is the only `latest`; auto would add a second one.
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -91,7 +93,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-          flavor: suffix=-cuda
+          # suffix does not apply to the auto `latest` tag, so without this the GPU image
+          # lands on `latest` and CPU users pull a CUDA build.
+          flavor: |
+            latest=false
+            suffix=-cuda
           tags: type=semver,pattern={{version}}
       - name: The GPU variant, same code with the CUDA wheels baked in
         uses: docker/build-push-action@v6
