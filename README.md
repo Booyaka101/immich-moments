@@ -119,7 +119,13 @@ OK  Index            16 assets, 210 scenes, 118 transcript segments at
                      D:\tmp\moments-fresh\moments.sqlite3
 ```
 
-Every line is a real request. A failure exits non-zero and says which one.
+Every line is a real request. A failure exits non-zero and says which one. A video the last
+run could not index is listed with the reason, so a problem does not vanish when the run
+scrolls away:
+
+```
+--  Not indexed      rotated_phone_clip.mp4: ffmpeg: moov atom not found
+```
 
 ### index
 

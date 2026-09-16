@@ -177,6 +177,7 @@ class Indexer:
                     continue
                 except (MediaError, MomentsError) as exc:
                     log.warning("%s: %s", asset["original_file_name"], exc)
+                    self.store.set_asset_status(asset["id"], "failed", str(exc))
                     report.failed.append((asset["original_file_name"], str(exc)))
                     continue
                 timing.seconds += time.monotonic() - started

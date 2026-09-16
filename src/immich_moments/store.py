@@ -343,6 +343,13 @@ class Store:
                 db.executemany("DELETE FROM assets WHERE id = ?", [(row["id"],) for row in gone])
         return gone
 
+    def problem_assets(self) -> list[sqlite3.Row]:
+        """Assets whose last run left an error, so `doctor` can say what is missing and why."""
+        return self.db.execute(
+            "SELECT original_file_name, status, error FROM assets "
+            "WHERE status IN ('failed', 'unavailable') ORDER BY file_created_at"
+        ).fetchall()
+
     def indexed_asset_ids(self) -> list[str]:
         """Assets with a visual index, oldest first, which is what write-back walks."""
         rows = self.db.execute(
@@ -504,7 +511,8 @@ class Store:
                     ),
                 )
             db.execute(
-                "UPDATE assets SET audio_indexed_at = ?, has_audio = ? WHERE id = ?",
+                "UPDATE assets SET audio_indexed_at = ?, has_audio = ?, "
+                "status = 'indexed', error = NULL WHERE id = ?",
                 (indexed_at, int(has_audio), asset_id),
             )
 

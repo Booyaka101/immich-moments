@@ -166,6 +166,13 @@ def doctor(
                     f"{counts['assets']} assets, {counts['scenes']} scenes, "
                     f"{counts['segments']} transcript segments at {config.db_path}",
                 )
+            problems = store.problem_assets()
+            if problems:
+                table.add_row(
+                    "[yellow]--[/]",
+                    "Not indexed",
+                    "\n".join(f"{row['original_file_name']}: {row['error']}" for row in problems),
+                )
 
     console.print(table)
     if not ok:

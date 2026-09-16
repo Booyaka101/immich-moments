@@ -39,8 +39,9 @@ footage, 8 named people.
 | renaming a person | renamed Martin to "Martin Selby" in Immich, one `index` run moved 8 faces onto the new name with the visual phase doing no work, and renaming back moved them back |
 | `--prune` | trashed a video in Immich, `index --prune` dropped it by name, its scene left the search and its thumbnail left the disk (209 of 210). Restoring it and re-indexing put all 210 back |
 | `--prune --limit` | refused, exit 2, before any request is sent |
+| `doctor` on a failed video | lists it by name with the ffmpeg error, and still exits 0 |
 
-Test suite: 243 passed, including the two slow tests that really run Whisper. The fast subset
+Test suite: 262 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Known limits, written down rather than hidden
@@ -56,9 +57,9 @@ also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks
   do not classify.
 - Faces only match people already named in Immich. Nothing is created or renamed. Naming
   someone later does reach the scenes already indexed, because the face embeddings are kept.
-- A video whose visual pass failed (corrupt file, ML hiccup) is retried on every run, download
-  included. A failed speech pass leaves no status behind at all. Both are visible in the run
-  report, neither is remembered.
+- A video whose pass failed (corrupt file, ML hiccup) is retried on every run, download
+  included. The reason is kept and `doctor` shows it, but nothing counts the attempts, so a
+  permanently broken file costs a download on every run.
 - Pruned scenes leave dead rows in the vector file. Nothing reads them, but only `--reindex`
   compacts the file.
 - Whisper transcribes but does not diarise, so the transcript never says who spoke.
@@ -108,6 +109,8 @@ them was believed.
   download. Faces are now detected on every scene, named people or not, which is one more
   `/predict` call per scene and is what makes naming later work.
 - `--write-back` skips trashed videos instead of dying on the first 404.
+- `doctor` lists what the last run could not index and why, reading the status the index
+  already kept. The speech pass now records a failure the way the visual pass always did.
 - `relabel`, which re-scores the stored vectors against a new vocabulary. On the 16-video
   index the default vocabulary changes nothing, which is the check that the labels on disk
   still match the vectors they came from. A real run against a copy moved 209 of 210 scenes
@@ -144,7 +147,7 @@ with a test each, and every assertion the TESTS paragraph asks for.
 
 Built in this round, because each was a small diff against something that already existed:
 the person filter, `--json`, `--like`, `relabel`, the `--since` / `--until` range, `--prune`,
-and the face re-match. The range in particular is one more clause on the `Filters` object, so
+the face re-match, and the `doctor` list of what failed. The range in particular is one more clause on the `Filters` object, so
 it narrows the vectors, the transcript and "more like this" without any of them knowing that
 dates exist.
 
@@ -164,6 +167,9 @@ Left out, with the reason, in the order I would build them next.
 6. A score floor. A query nothing matches still prints the library's best guess. The score
    column says so, and a badly chosen floor would hide the speech-led hits that land near
    0.35.
+7. A retry budget. A file that fails every time is downloaded again on every run. Counting the
+   attempts and backing off needs a column and a flag to force a retry anyway, and getting the
+   backoff wrong would hide a video that a fixed ML container would now index.
 
 ## Distribution
 

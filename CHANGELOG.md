@@ -47,6 +47,8 @@ First release.
   theirs in the index the same way.
 - `--write-back` skips a video that has been trashed since it was indexed and says so,
   instead of ending the run on the first 404.
+- `doctor` lists the videos the last run could not index, with the reason. A failed speech
+  pass is now recorded like a failed visual one, and either is cleared by the run that works.
 - `search --since` and `--until`, and the two date boxes in the UI: bounds the search by the
   day the video was filmed. Inclusive at both ends, and applied before either channel scores
   anything.

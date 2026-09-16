@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 from immich_moments.config import Config
+from immich_moments.errors import MediaError
 from immich_moments.immich import ImmichClient
 from immich_moments.indexer import Indexer, IndexReport, _duration, run_index
 from immich_moments.ml import MLClient
@@ -341,6 +342,26 @@ def test_a_404_during_re_extraction_is_recorded_not_raised(
 
     assert report.unavailable == ["colour-cards.mp4"]
     assert report.failed == []
+
+
+def test_a_speech_failure_is_written_down_and_cleared_by_the_run_that_works(
+    config: Config, store: Store, colour_video: Path, labels_file: Path
+) -> None:
+    """Without a status, a video Whisper choked on is indistinguishable from one with no speech."""
+
+    class Broken(SilentTranscriber):
+        def transcribe(self, audio: Path):
+            raise MediaError("whisper ran out of memory")
+
+    index(config, store, colour_video, labels_file)
+    report = audio_pass(config, store, colour_video, Broken())
+
+    assert report.failed == [("colour-cards.mp4", "whisper ran out of memory")]
+    assert [row["error"] for row in store.problem_assets()] == ["whisper ran out of memory"]
+
+    audio_pass(config, store, colour_video, SilentTranscriber())
+
+    assert store.problem_assets() == []
 
 
 def test_transcript_segments_land_in_the_scene_that_was_playing(

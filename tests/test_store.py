@@ -375,3 +375,34 @@ def test_people_no_longer_named_lose_their_reference(store: Store) -> None:
     assert store.delete_person_refs_except(["p1"]) == 1
     identities, _ = store.people_refs()
     assert identities == [("p1", "Anna")]
+
+
+def test_what_failed_is_listed_with_its_reason_until_the_asset_indexes(store: Store, config: Config) -> None:
+    seed_asset(store)
+    seed_asset(store, "a2")
+    store.set_asset_status("a1", "failed", "ffmpeg: moov atom not found")
+    store.set_asset_status("a2", "unavailable", "HTTP 404")
+
+    listed = [(row["original_file_name"], row["status"], row["error"]) for row in store.problem_assets()]
+    assert listed == [
+        ("a1.mp4", "failed", "ffmpeg: moov atom not found"),
+        ("a2.mp4", "unavailable", "HTTP 404"),
+    ]
+
+    store.replace_scenes(
+        "a1", [SceneRecord(0, 0.0, 6.0, vector=None)], VectorFile(config.vectors_path, 8), indexed_at=NOW
+    )
+    assert [row["original_file_name"] for row in store.problem_assets()] == ["a2.mp4"]
+
+
+def test_a_transcript_clears_the_failure_that_came_before_it(store: Store) -> None:
+    """A speech pass that failed once and then worked should not read as broken forever."""
+    seed_asset(store)
+    store.set_asset_status("a1", "failed", "ffmpeg: no such file")
+
+    store.replace_transcript(
+        "a1", [TranscriptRecord(1.0, 2.0, "happy birthday")], has_audio=True, indexed_at=NOW
+    )
+
+    assert store.problem_assets() == []
+    assert store.asset("a1")["error"] is None
