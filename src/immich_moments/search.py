@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -228,24 +229,47 @@ def browse(store: Store, filters: Filters, *, limit: int = 20) -> list[Hit]:
     return _hydrate(store, [(int(row["id"]), 0.0) for row in rows], {}, {})
 
 
-def _candidates(store: Store, filters: Filters) -> tuple[np.ndarray, np.ndarray]:
-    """Scene ids the filters allow, and the vectors that go with them, in id order."""
-    if store.get_state("vector_dim") is None:
-        return np.empty(0, dtype=np.int64), np.empty((0, 0), dtype=np.float32)
-    vectors = store.vectors().read_all()
-    if vectors.size == 0:
-        return np.empty(0, dtype=np.int64), np.empty((0, 0), dtype=np.float32)
+_NOTHING = (np.empty(0, dtype=np.int64), np.empty((0, 0), dtype=np.float32))
 
-    where, params = filters.sql("asset_id", "id")
-    rows = store.db.execute(
-        f"SELECT id, vector_row FROM scenes WHERE vector_row IS NOT NULL{where} ORDER BY id",  # noqa: S608
-        params,
-    ).fetchall()
-    usable = [(r["id"], r["vector_row"]) for r in rows if r["vector_row"] < vectors.shape[0]]
-    if not usable:
-        return np.empty(0, dtype=np.int64), np.empty((0, 0), dtype=np.float32)
-    scene_ids = np.array([scene_id for scene_id, _ in usable], dtype=np.int64)
-    return scene_ids, vectors[np.array([row for _, row in usable])]
+
+def _gather(matrix: np.ndarray, rows: np.ndarray) -> np.ndarray:
+    """The vectors at `rows`. A view when they are the leading block, a copy otherwise.
+
+    Unfiltered, `rows` is every row in order, and taking that as a view is what keeps a search
+    from doubling the matrix in memory.
+    """
+    if rows[-1] == rows.size - 1 and np.array_equal(rows, np.arange(rows.size)):
+        return matrix[: rows.size]
+    return matrix[rows]
+
+
+@contextmanager
+def _candidates(store: Store, filters: Filters) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    """Scene ids the filters allow, and the vectors that go with them, in id order.
+
+    The vectors are backed by a memory map that closes when the block ends, so nothing here may
+    be held past it.
+    """
+    if store.get_state("vector_dim") is None:
+        yield _NOTHING
+        return
+    with store.vectors().mapped() as vectors:
+        if vectors.size == 0:
+            yield _NOTHING
+            return
+
+        where, params = filters.sql("asset_id", "id")
+        found = store.db.execute(
+            f"SELECT id, vector_row FROM scenes WHERE vector_row IS NOT NULL{where} ORDER BY id",  # noqa: S608
+            params,
+        ).fetchall()
+        usable = [(r["id"], r["vector_row"]) for r in found if r["vector_row"] < vectors.shape[0]]
+        if not usable:
+            yield _NOTHING
+            return
+        scene_ids = np.array([scene_id for scene_id, _ in usable], dtype=np.int64)
+        rows = np.array([row for _, row in usable])
+        yield scene_ids, _gather(vectors, rows)
 
 
 def similar(
@@ -259,15 +283,16 @@ def similar(
     row = store.db.execute("SELECT vector_row FROM scenes WHERE id = ?", (scene_id,)).fetchone()
     if row is None or row["vector_row"] is None:
         raise ConfigError(f"scene {scene_id} is not in the index, or was indexed without a vector.")
-    vectors = store.vectors().read_all()
-    if row["vector_row"] >= vectors.shape[0]:
+    vector_file = store.vectors()
+    if row["vector_row"] >= vector_file.rows:
         raise ConfigError(f"scene {scene_id} points past the end of the vector file.")
     reference = _hydrate(store, [(scene_id, 1.0)], {scene_id: 1.0}, {})[0]
 
-    scene_ids, matrix = _candidates(store, filters)
-    if scene_ids.size == 0:
-        return reference, []
-    scores = matrix @ vectors[row["vector_row"]]
+    with _candidates(store, filters) as (scene_ids, matrix):
+        if scene_ids.size == 0:
+            return reference, []
+        # Copied out of the map, because the scores are needed after the block closes.
+        scores = np.asarray(matrix @ vector_file.read_one(row["vector_row"]))
     ranked = [
         (int(scene_ids[i]), float(scores[i]))
         for i in np.argsort(-scores, kind="stable")[: limit + 1]
@@ -286,12 +311,12 @@ def _visual_scores(
     channel: on a library of 10,000 scenes the top 400 average far above the whole, so a scene
     CLIP is certain about normalises as if it were ordinary.
     """
-    scene_ids, matrix = _candidates(store, filters)
-    if scene_ids.size == 0:
-        return {}, 0.0
-    scores = matrix @ ml.embed_text(query)
-    top = np.argsort(-scores)[:CANDIDATES]
-    return {int(scene_ids[i]): float(scores[i]) for i in top}, float(scores.mean())
+    with _candidates(store, filters) as (scene_ids, matrix):
+        if scene_ids.size == 0:
+            return {}, 0.0
+        scores = matrix @ ml.embed_text(query)
+        top = np.argsort(-scores)[:CANDIDATES]
+        return {int(scene_ids[i]): float(scores[i]) for i in top}, float(scores.mean())
 
 
 def _text_scores(store: Store, query: str, filters: Filters) -> dict[int, TextMatch]:

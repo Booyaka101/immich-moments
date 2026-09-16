@@ -181,6 +181,31 @@ class VectorFile:
             return np.zeros((0, self.dim), dtype=np.float32)
         return np.fromfile(self.path, dtype=np.float32).reshape(-1, self.dim)
 
+    def read_one(self, row: int) -> np.ndarray:
+        """One vector, without paying for the rest of the file."""
+        stride = self.dim * 4
+        with self.path.open("rb") as handle:
+            handle.seek(row * stride)
+            return np.frombuffer(handle.read(stride), dtype=np.float32)
+
+    @contextmanager
+    def mapped(self) -> Iterator[np.ndarray]:
+        """The matrix as a read-only memory map, for a reader that only needs it briefly.
+
+        Unlike `read_all` this costs page cache rather than heap, which matters because a search
+        touches every row. Windows will not truncate or delete a mapped file, so the array must
+        not outlive the block: `index --prune` and `--reindex` both rewrite this file.
+        """
+        rows = self.rows
+        if rows == 0:
+            yield np.zeros((0, self.dim), dtype=np.float32)
+            return
+        matrix = np.memmap(self.path, dtype=np.float32, mode="r", shape=(rows, self.dim))
+        try:
+            yield matrix
+        finally:
+            matrix._mmap.close()
+
 
 class Store:
     def __init__(self, config: Config) -> None:
