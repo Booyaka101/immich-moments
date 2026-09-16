@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from immich_moments.config import Config
+from immich_moments.errors import DimensionMismatch
 from immich_moments.store import FaceRecord, SceneRecord, Store, TranscriptRecord, VectorFile
 from immich_moments.web.app import create_app
 
@@ -182,3 +184,34 @@ def test_serving_without_credentials_fails_before_the_port_is_opened(tmp_path: P
 
     with pytest.raises(ConfigError, match="IMMICH_URL"):
         create_app(Config(data_dir=tmp_path))
+
+
+def test_a_search_does_not_run_on_the_event_loop(client: TestClient, monkeypatch) -> None:
+    """It is blocking HTTP then SQLite: on the loop, one query freezes the page and the thumbnails."""
+    import immich_moments.web.app as web
+
+    on_loop: list[bool] = []
+    real = web.run_search
+
+    def record(*args, **kwargs):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            on_loop.append(False)
+        else:
+            on_loop.append(True)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(web, "run_search", record)
+    assert client.get("/api/search", params={"q": "candles"}).status_code == 200
+
+    assert on_loop == [False]
+
+
+def test_an_index_built_with_another_model_refuses_to_serve(seeded: Config) -> None:
+    with Store(seeded) as store:
+        store.set_state("clip_model", "ViT-L-14__openai")
+
+    app = create_app(seeded, immich_transport=immich_transport(), ml_transport=ml_transport(CANDLES))
+    with pytest.raises(DimensionMismatch, match="--reindex"), TestClient(app):
+        pass  # pragma: no cover - startup raises

@@ -28,7 +28,8 @@ def read_labels(path: Path | None = None) -> list[str]:
         lines = source.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         raise ConfigError(f"cannot read the label list {source}: {exc}") from exc
-    labels = [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+    stripped = (line.strip() for line in lines)
+    labels = [line for line in stripped if line and not line.startswith("#")]
     if not labels:
         raise ConfigError(f"{source} contains no labels")
     return labels

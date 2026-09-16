@@ -34,7 +34,7 @@ footage, 8 named people.
 | clean wheel install | `immich-moments doctor` and `search` work from a fresh venv |
 | Docker image | builds, runs, `doctor` passes on Immich's own compose network |
 
-Test suite: 184 passed, including the two slow tests that really run Whisper. The fast subset
+Test suite: 195 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Known limits, written down rather than hidden
@@ -52,6 +52,30 @@ also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks
 - Whisper transcribes but does not diarise, so the transcript never says who spoke.
 - Write-back never removes a tag it once added.
 - There is no auth on the web UI.
+
+## Review round after 1.0.0 was cut
+
+A full read of every module found nine real defects, all fixed with a test each before any of
+them was believed.
+
+- `discover --limit` checkpointed a truncated enumeration, so every video the limit never
+  reached would have been invisible to the next `--since auto` run, permanently.
+- The store's SQLite connection was bound to its creating thread, so a search from the web app
+  would have raised as soon as it left the event loop.
+- `serve` and `search` never checked the stored CLIP model against the configured one. Only
+  `index` did, so an index built with another model scored happily against nonsense.
+- Vectors are appended before the transaction that points at them. A run killed in between
+  left rows nothing references, and the next append would have written past them. The tail is
+  now reclaimed at open, including a half-written vector.
+- Searches ran the ML HTTP call and SQLite on the event loop, which froze the page and every
+  thumbnail behind one query. They run in a thread pool now, one at a time.
+- `person_thumbnail` raised on the 404 Immich answers until its own thumbnail job has run, so
+  `doctor` failed on a library that was merely still working.
+- Both retry loops slept after the final attempt, which is dead wait before an exception
+  nobody can act on. The fast test suite got a third faster as a side effect.
+- A full disk surfaced as an unhandled `OSError` traceback. It is exit code 7 now, with the
+  note that progress is checkpointed.
+- `--labels` kept lines whose comment marker was indented, so `  # like this` became a label.
 
 ## Features considered and not built
 

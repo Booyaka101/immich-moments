@@ -51,13 +51,14 @@ class CountingML:
 def labels_file(tmp_path: Path) -> Path:
     path = tmp_path / "labels.txt"
     path.write_text(
-        "# vocabulary\na birthday cake\n\n   a garden   \n# trailing comment\n",
+        "# vocabulary\na birthday cake\n\n   a garden   \n  # an indented comment\n",
         encoding="utf-8",
     )
     return path
 
 
 def test_the_list_is_read_without_comments_or_blanks(labels_file: Path) -> None:
+    """An indented comment used to survive as a label, and a label becomes a tag in Immich."""
     assert read_labels(labels_file) == ["a birthday cake", "a garden"]
 
 

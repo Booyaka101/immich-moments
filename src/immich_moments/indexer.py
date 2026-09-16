@@ -81,6 +81,7 @@ class Indexer:
     def discover(self, since: str | None, limit: int | None = None) -> int:
         """Record every video asset Immich knows about. Cheap, and safe to repeat."""
         found = 0
+        truncated = False
         for asset in self.immich.iter_videos(updated_after=since):
             asset_id = asset.get("id")
             if not asset_id:
@@ -94,8 +95,12 @@ class Indexer:
             )
             found += 1
             if limit is not None and found >= limit:
+                truncated = True
                 break
-        self.store.set_state("last_discovery", _now())
+        # Checkpointing a truncated enumeration would hide every video --limit never reached from
+        # the next `--since auto` run, permanently.
+        if not truncated:
+            self.store.set_state("last_discovery", _now())
         return found
 
     def refresh_people(self) -> int:

@@ -325,3 +325,39 @@ def test_transcript_segments_land_in_the_scene_that_was_playing(
     segment = store.transcript_for(ASSET_ID)[0]
     scenes = {scene["id"]: scene["idx"] for scene in store.scenes_for(ASSET_ID)}
     assert scenes[segment["scene_id"]] == 1
+
+
+def catalogue(count: int) -> httpx.MockTransport:
+    """A library of `count` videos on one page, for the discovery checkpoint tests."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        items = [
+            {
+                "id": f"{ASSET_ID[:-1]}{n}",
+                "originalFileName": f"clip-{n}.mp4",
+                "type": "VIDEO",
+                "duration": 1000,
+            }
+            for n in range(count)
+        ]
+        return httpx.Response(200, json={"assets": {"items": items, "nextPage": None}})
+
+    return httpx.MockTransport(handler)
+
+
+def discover(config: Config, store: Store, *, count: int, limit: int | None) -> int:
+    with ImmichClient(config, transport=catalogue(count)) as immich:
+        return Indexer(config, store, immich, ml=None).discover(None, limit=limit)
+
+
+def test_a_truncated_discovery_does_not_move_the_checkpoint(config: Config, store: Store) -> None:
+    """Otherwise `index --limit 5` hides the other 95 videos from every later --since auto."""
+    assert discover(config, store, count=8, limit=3) == 3
+
+    assert store.get_state("last_discovery") is None
+
+
+def test_a_complete_discovery_moves_the_checkpoint(config: Config, store: Store) -> None:
+    assert discover(config, store, count=8, limit=None) == 8
+
+    assert store.get_state("last_discovery") is not None

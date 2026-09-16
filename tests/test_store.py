@@ -61,6 +61,49 @@ def test_a_model_change_refuses_to_mix_spaces(store: Store) -> None:
     assert store.get_state("clip_model") == "ViT-B-32__openai"
 
 
+def test_searching_against_another_model_is_refused(store: Store) -> None:
+    """`search` and `serve` embed the query with whatever the server says today."""
+    store.check_model("ViT-B-32__openai", 512, reindex=False)
+    store.assert_model("ViT-B-32__openai")
+
+    with pytest.raises(DimensionMismatch, match="--reindex"):
+        store.assert_model("ViT-L-14__openai")
+
+
+def test_searching_an_empty_index_has_no_model_to_disagree_with(store: Store) -> None:
+    store.assert_model("ViT-B-32__openai")
+
+
+def test_vectors_appended_without_a_commit_are_reclaimed(store: Store, config: Config) -> None:
+    """A run killed between the append and its transaction leaves rows nothing points at."""
+    seed_asset(store)
+    store.check_model("ViT-B-32__openai", 8, reindex=False)
+    store.replace_scenes(
+        "a1",
+        [SceneRecord(0, 0.0, 10.0, vector=unit(1))],
+        VectorFile(config.vectors_path, 8),
+        indexed_at=NOW,
+    )
+    orphan = VectorFile(config.vectors_path, 8)
+    orphan.append(unit(2))
+    orphan.append(unit(3))
+    assert orphan.rows == 3
+    store.close()
+
+    with Store(config) as reopened:
+        assert reopened.vectors().rows == 1
+        np.testing.assert_allclose(reopened.vectors().read_all()[0], unit(1), rtol=1e-6)
+
+
+def test_a_torn_write_at_the_tail_is_reclaimed_too(store: Store, config: Config) -> None:
+    store.check_model("ViT-B-32__openai", 8, reindex=False)
+    config.vectors_path.write_bytes(bytes(13))
+    store.close()
+
+    with Store(config) as reopened:
+        assert reopened.vectors().rows == 0
+
+
 def test_reindex_clears_the_old_space(store: Store, config: Config) -> None:
     seed_asset(store)
     vectors = VectorFile(config.vectors_path, 8)

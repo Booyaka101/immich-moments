@@ -18,6 +18,14 @@ RECORDED = json.loads((Path(__file__).parent / "fixtures" / "recorded.json").rea
 FRAME = (Path(__file__).parent / "fixtures" / "frame.jpg").read_bytes()
 
 
+@pytest.fixture(autouse=True)
+def no_backoff_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Backoff is exercised for its arithmetic, not for its wall-clock cost."""
+    slept: list[float] = []
+    monkeypatch.setattr("immich_moments.ml.time.sleep", slept.append)
+    return slept
+
+
 def entries_of(request: httpx.Request) -> str:
     """The `entries` form field, whether httpx sent multipart (with an image) or urlencoded."""
     body = request.content.decode("utf-8", "replace")
@@ -102,7 +110,9 @@ def test_a_model_the_container_cannot_load_is_reported_clearly(config: Config) -
     assert "ViT-L-14" in str(caught.value)
 
 
-def test_a_dead_container_gives_up_after_the_configured_retries(config: Config) -> None:
+def test_a_dead_container_gives_up_after_the_configured_retries(
+    config: Config, no_backoff_sleep: list[float]
+) -> None:
     attempts = 0
 
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -116,3 +126,4 @@ def test_a_dead_container_gives_up_after_the_configured_retries(config: Config) 
         ml.embed_text("anything")
     assert attempts == 2
     assert "2 attempts" in str(caught.value)
+    assert len(no_backoff_sleep) == 1  # not after the last attempt

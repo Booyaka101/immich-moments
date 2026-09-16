@@ -92,7 +92,8 @@ class MLClient:
                     return _body(response)
                 else:
                     raise MLError(_failure(response, entries))
-            time.sleep(min(2.0**attempt, 20.0) + random.random() * 0.5)  # noqa: S311
+            if attempt < self.config.max_retries - 1:
+                time.sleep(min(2.0**attempt, 20.0) + random.random() * 0.5)  # noqa: S311
         raise MLError(
             f"POST {self.config.ml_url}/predict failed after {self.config.max_retries} attempts: {last_error}"
         )

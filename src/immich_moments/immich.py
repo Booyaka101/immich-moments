@@ -85,9 +85,11 @@ class ImmichClient:
                 if response.status_code not in RETRY_STATUSES:
                     return self._checked(response, method, url)
                 last_error = f"HTTP {response.status_code}"
-                self._sleep_for(response, attempt)
+                if attempt < self.config.max_retries - 1:
+                    self._sleep_for(response, attempt)
                 continue
-            self._sleep_for(None, attempt)
+            if attempt < self.config.max_retries - 1:
+                self._sleep_for(None, attempt)
         raise ImmichError(
             f"{method} {url} failed after {self.config.max_retries} attempts: {last_error}", url=url
         )
@@ -277,15 +279,20 @@ class ImmichClient:
 
     def asset_thumbnail(self, asset_id: str, size: str = "preview") -> bytes | None:
         """A real still from the library, used by `doctor` to round-trip the ML container."""
-        response = self.request(
-            "GET", f"/assets/{asset_id}/thumbnail", params={"size": size}, headers={"Accept": "image/*"}
-        )
-        return response.content or None
+        return self._thumbnail(f"/assets/{asset_id}/thumbnail", params={"size": size})
 
     def person_thumbnail(self, person_id: str) -> bytes | None:
         """None when the person has no usable thumbnail, which is not an error."""
-        url = f"/people/{person_id}/thumbnail"
-        response = self.request("GET", url, headers={"Accept": "image/*"})
+        return self._thumbnail(f"/people/{person_id}/thumbnail")
+
+    def _thumbnail(self, url: str, **kwargs: Any) -> bytes | None:
+        """Immich answers 404 until its own thumbnail job has run, which is a wait, not a failure."""
+        try:
+            response = self.request("GET", url, headers={"Accept": "image/*"}, **kwargs)
+        except ImmichError as exc:
+            if exc.status in (404, 410):
+                return None
+            raise
         return response.content or None
 
     # ---- tags ------------------------------------------------------------

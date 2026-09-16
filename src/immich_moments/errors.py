@@ -40,6 +40,12 @@ class MediaError(MomentsError):
     exit_code = 5
 
 
+class StorageError(MomentsError):
+    """The data directory could not be read or written: a full disk, or the wrong permissions."""
+
+    exit_code = 7
+
+
 class DimensionMismatch(MomentsError):
     """Stored vectors were produced by a different model than the one configured now."""
 

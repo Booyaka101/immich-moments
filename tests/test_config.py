@@ -17,6 +17,9 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     for name in list(os.environ):
         if name.startswith("IMMICH") or name == "DATA_DIR":
             monkeypatch.delenv(name, raising=False)
+    # The data dir is searched for immich-moments.toml, so without this the developer's own
+    # config decides whether the defaults below hold.
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)
 
 

@@ -113,10 +113,27 @@ def test_rate_limit_is_retried_and_honours_retry_after(config: Config, no_backof
     assert no_backoff_sleep[0] >= 7.0
 
 
-def test_giving_up_names_the_last_failure(config: Config) -> None:
+def test_giving_up_names_the_last_failure(config: Config, no_backoff_sleep: list[float]) -> None:
+    config.max_retries = 4
     with client(config, lambda _r: json_response({"message": "nope"}, status=503)) as immich:
-        with pytest.raises(ImmichError, match=r"after 2 attempts: HTTP 503"):
+        with pytest.raises(ImmichError, match=r"after 4 attempts: HTTP 503"):
             immich.server_version()
+
+    # Sleeping after the last attempt is pure dead wait before an exception nobody can act on.
+    assert len(no_backoff_sleep) == 3
+
+
+def test_a_thumbnail_that_does_not_exist_yet_is_none_not_an_error(config: Config) -> None:
+    """Immich 404s until its own thumbnail job has run, and `doctor` walks every named person."""
+    with client(config, lambda _r: json_response({"message": "Not found"}, status=404)) as immich:
+        assert immich.person_thumbnail("p1") is None
+        assert immich.asset_thumbnail("a1") is None
+
+
+def test_a_thumbnail_failure_that_is_not_a_404_still_raises(config: Config) -> None:
+    with client(config, lambda _r: json_response({"message": "boom"}, status=422)) as immich:
+        with pytest.raises(ImmichError, match="422"):
+            immich.person_thumbnail("p1")
 
 
 def test_a_rejected_key_says_so_in_english(config: Config) -> None:

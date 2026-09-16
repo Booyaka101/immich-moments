@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from ..config import Config
 from ..errors import MomentsError
@@ -44,6 +46,9 @@ def create_app(
         app.state.immich = immich
         app.state.ml = MLClient(config, clip_model, face_model, transport=ml_transport)
         app.state.clip_model = clip_model
+        app.state.store.assert_model(clip_model)
+        # One search at a time: it is the only thing that touches the store off the event loop.
+        app.state.searching = asyncio.Lock()
         try:
             yield
         finally:
@@ -64,12 +69,12 @@ def create_app(
         return templates.TemplateResponse(
             request=request,
             name="index.html",
-            context={"stats": _stats(request.app)},
+            context={"stats": await _stats(request.app)},
         )
 
     @app.get("/api/stats")
     async def stats(request: Request):
-        return _stats(request.app)
+        return await _stats(request.app)
 
     @app.get("/api/search")
     async def search(
@@ -80,14 +85,18 @@ def create_app(
         asset: str | None = Query(None),
     ):
         state = request.app.state
-        hits = run_search(
-            state.store,
-            state.ml,
-            q,
-            limit=limit,
-            visual_weight=config.visual_weight if weight is None else weight,
-            asset_id=asset,
-        )
+        # A search is an HTTP call to the ML container and then SQLite, both blocking. On the event
+        # loop it would freeze the page and every thumbnail behind one query.
+        async with state.searching:
+            hits = await run_in_threadpool(
+                run_search,
+                state.store,
+                state.ml,
+                q,
+                limit=limit,
+                visual_weight=config.visual_weight if weight is None else weight,
+                asset_id=asset,
+            )
         return {
             "query": q,
             "weight": config.visual_weight if weight is None else weight,
@@ -126,8 +135,9 @@ def _serialise(hit: Hit, config: Config) -> dict:
     }
 
 
-def _stats(app: FastAPI) -> dict:
-    counts = app.state.store.counts()
+async def _stats(app: FastAPI) -> dict:
+    async with app.state.searching:
+        counts = app.state.store.counts()
     return {
         "assets": counts["assets"],
         "scenes": counts["scenes"],

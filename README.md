@@ -304,6 +304,22 @@ whisper_model = "medium"
 visual_weight = 0.5
 ```
 
+### Exit codes
+
+Every command exits deliberately, so a cron job or a shell script can tell a broken key from a
+full disk.
+
+| Code | Meaning |
+|---|---|
+| 0 | Worked. Assets whose original had been deleted are skipped, not failed |
+| 1 | Anything else that went wrong |
+| 2 | Configuration: a missing URL or key, or a setting that will not parse |
+| 3 | Immich refused or could not answer |
+| 4 | The ML container refused or could not answer |
+| 5 | ffmpeg or ffprobe could not read the file |
+| 6 | The index was built with a different CLIP model. Re-run with `--reindex` |
+| 7 | The data directory could not be read or written. Progress is checkpointed, so fix it and re-run |
+
 ## How it works
 
 1. `GET /api/search/metadata` lists your videos, `GET /api/assets/:id/original` fetches one.

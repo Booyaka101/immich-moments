@@ -15,7 +15,7 @@ from rich.table import Table
 
 from . import __version__
 from .config import Config, load_config
-from .errors import MomentsError
+from .errors import MomentsError, StorageError
 from .faces import pad_thumbnail
 from .immich import ImmichClient
 from .indexer import run_index
@@ -230,8 +230,9 @@ def search(
 ) -> None:
     """Search the index and print the matching scenes with timestamps."""
     config = _setup(config_path, verbose)
-    immich, ml, _clip, _face = _clients(config)
+    immich, ml, clip_model, _face = _clients(config)
     with immich, ml, Store(config) as store:
+        store.assert_model(clip_model)
         hits = run_search(
             store,
             ml,
@@ -279,8 +280,10 @@ def serve(
     config.require_credentials()
     from .web.app import create_app
 
-    with ImmichClient(config) as immich:
-        immich.model_names()  # fail here with a readable message rather than inside uvicorn
+    # Fail here with a readable message rather than inside uvicorn.
+    with ImmichClient(config) as immich, Store(config) as store:
+        clip_model, _face = immich.model_names()
+        store.assert_model(clip_model)
 
     console.print(f"immich-moments on http://{config.host}:{config.port}")
     uvicorn.run(create_app(config), host=config.host, port=config.port, log_level="info")
@@ -399,6 +402,11 @@ def main() -> None:
     except KeyboardInterrupt:
         err.print("[yellow]interrupted.[/] Progress is checkpointed; re-run to continue.")
         raise SystemExit(130) from None
+    except OSError as exc:
+        # A full disk or a read-only data dir is the environment talking, not a bug to report.
+        err.print(f"[red]error:[/] {exc}")
+        err.print("[dim]Progress is checkpointed; fix the disk and re-run to continue.[/]")
+        raise SystemExit(StorageError.exit_code) from exc
     except Exception as exc:
         err.print(f"[red]unexpected {exc.__class__.__name__}:[/] {exc}")
         err.print("[dim]Re-run with --verbose for the traceback, and please report it.[/]")

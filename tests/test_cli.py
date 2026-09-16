@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 
 from immich_moments import __version__
 from immich_moments.cli import app, main
-from immich_moments.errors import ConfigError, ImmichError
+from immich_moments.errors import ConfigError, ImmichError, StorageError
 
 runner = CliRunner()
 
@@ -95,4 +95,23 @@ def test_an_unknown_option_in_the_config_file_names_the_file(
     captured = capsys.readouterr()
     assert code == ConfigError.exit_code
     assert "visual_wieght" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_a_full_disk_is_the_environment_talking_not_a_bug(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """ENOSPC used to print "unexpected OSError" and ask the user to report it."""
+    monkeypatch.setenv("IMMICH_URL", "http://localhost:2283")
+    monkeypatch.setenv("IMMICH_API_KEY", "key")
+
+    def full(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("immich_moments.cli._clients", full)
+
+    code, _ = run("index", monkeypatch=monkeypatch)
+
+    captured = capsys.readouterr()
+    assert code == StorageError.exit_code
+    assert "No space left on device" in captured.err
+    assert "report it" not in captured.err
     assert "Traceback" not in captured.err

@@ -157,6 +157,15 @@ class VectorFile:
             handle.write(vec.tobytes())
         return row
 
+    def truncate(self, rows: int) -> None:
+        """Drop everything past `rows`, including a half-written vector at the tail."""
+        if not self.path.exists():
+            return
+        wanted = rows * self.dim * 4
+        if self.path.stat().st_size > wanted:
+            with self.path.open("r+b") as handle:
+                handle.truncate(wanted)
+
     def read_all(self) -> np.ndarray:
         if not self.path.exists():
             return np.zeros((0, self.dim), dtype=np.float32)
@@ -168,13 +177,27 @@ class Store:
         self.config = config
         self.path = config.db_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path, isolation_level=None)
+        # The web app runs searches in a worker thread, so the connection outlives its
+        # creating thread. sqlite3.threadsafety is 3 on every build we support, and the app
+        # holds a lock so only one thread is ever inside it.
+        self.db = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.executescript(SCHEMA)
         self.set_state("schema_version", str(SCHEMA_VERSION))
+        self._reclaim_orphan_vectors()
+
+    def _reclaim_orphan_vectors(self) -> None:
+        """Vectors are appended before the transaction that points at them, so a run killed in
+        between leaves rows nothing references. The file is append-only, so the tail is reusable."""
+        stored_dim = self.get_state("vector_dim")
+        if stored_dim is None:
+            return
+        top = self.db.execute("SELECT MAX(vector_row) AS top FROM scenes").fetchone()["top"]
+        rows = 0 if top is None else int(top) + 1
+        VectorFile(self.config.vectors_path, int(stored_dim)).truncate(rows)
 
     def close(self) -> None:
         self.db.close()
@@ -234,6 +257,16 @@ class Store:
             self.reset_index()
         self.set_state("clip_model", clip_model)
         self.set_state("vector_dim", str(dim))
+
+    def assert_model(self, clip_model: str) -> None:
+        """Searching is the other half of check_model: the query and the index share a space."""
+        stored = self.get_state("clip_model")
+        if stored is not None and stored != clip_model:
+            raise DimensionMismatch(
+                f"the index was built with CLIP model {stored!r} but the server now reports "
+                f"{clip_model!r}. Every score would be meaningless. Run "
+                "`immich-moments index --reindex` to rebuild."
+            )
 
     def reset_index(self) -> None:
         with self.transaction() as db:
