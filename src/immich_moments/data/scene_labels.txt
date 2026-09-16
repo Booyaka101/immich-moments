@@ -1,0 +1,249 @@
+# Zero-shot scene vocabulary for home video. One label per line; blank lines and # comments
+# are ignored. Each is embedded once with the server's CLIP text encoder and cached, then the
+# closest label above the similarity floor becomes the scene's tag.
+# Override with `immich-moments index --labels my-labels.txt`.
+
+birthday cake
+blowing out candles
+opening presents
+a christmas tree
+decorating a christmas tree
+a wedding ceremony
+a wedding reception
+cutting a wedding cake
+a first dance
+a graduation ceremony
+a baby shower
+a halloween costume
+carving a pumpkin
+an easter egg hunt
+a new year fireworks display
+fireworks at night
+a birthday party
+blowing up balloons
+a picnic in a park
+a barbecue in the garden
+a family dinner at a table
+cooking in a kitchen
+baking in an oven
+chopping vegetables
+pouring a drink
+a toast with glasses
+eating at a restaurant
+drinking coffee in a cafe
+a bowl of food close up
+an ice cream cone
+
+a baby crawling
+a baby taking first steps
+a toddler playing with toys
+a child riding a bicycle
+a child on a swing
+children playing in a playground
+a child swimming in a pool
+a child learning to walk
+a school concert
+a school play on a stage
+a nativity play
+a sports day race
+a football match
+a rugby match
+a basketball game
+a tennis match
+a cricket match
+a golf swing
+a martial arts class
+a dance recital
+a ballet performance
+a gymnastics routine
+a swimming gala
+a running race
+a marathon finish line
+a bike ride on a trail
+a skateboard trick
+a snowboarding run
+skiing down a slope
+ice skating on a rink
+
+a dog running
+a dog playing fetch
+a puppy
+a cat sleeping
+a cat playing
+a horse in a field
+horse riding
+feeding ducks
+birds at a feeder
+a farm with animals
+a zoo enclosure
+an aquarium tank
+a butterfly on a flower
+a bee on a flower
+
+a beach with waves
+building a sandcastle
+swimming in the sea
+surfing a wave
+a boat on water
+a kayak on a river
+a lake at sunset
+a waterfall
+a river in a forest
+a mountain view
+hiking on a trail
+a camping tent
+a campfire at night
+a forest walk
+a field of flowers
+a garden in bloom
+mowing a lawn
+gardening with a trowel
+a sunset over the horizon
+a sunrise
+a rainbow after rain
+snow falling
+a snowman
+a thunderstorm
+a foggy morning
+autumn leaves
+a starry night sky
+
+a city street at night
+a busy city crossing
+a market stall
+a shopping centre
+a supermarket aisle
+a train station platform
+a train passing
+an airport terminal
+an aeroplane taking off
+a view from an aeroplane window
+driving on a motorway
+a view from a car window
+a bus journey
+a taxi ride
+a bicycle in a city
+a car park
+a petrol station
+a road trip through countryside
+a museum gallery
+an art exhibition
+a cathedral interior
+a church service
+a castle
+ancient ruins
+a historic monument
+a lighthouse
+a harbour with boats
+a pier over water
+a theme park ride
+a rollercoaster
+a ferris wheel
+a carousel
+a funfair at night
+a circus tent
+a parade in a street
+a street festival
+a live music concert
+a band playing on stage
+someone playing a guitar
+someone playing a piano
+someone playing a violin
+someone playing drums
+singing into a microphone
+a choir singing
+a karaoke night
+a dj at a mixing desk
+dancing at a party
+a nightclub dance floor
+
+a living room
+a kitchen
+a bedroom
+a bathroom
+a garden patio
+a balcony view
+a hotel room
+a swimming pool
+a hot tub
+a home office desk
+a workshop with tools
+a garage
+building furniture
+painting a wall
+a house under renovation
+moving boxes into a house
+unpacking a suitcase
+wrapping a present
+a christmas morning
+opening a card
+
+a close up of a face
+a person smiling at the camera
+two people hugging
+a group photo pose
+a selfie
+people waving at the camera
+a crowd of people
+a person talking to camera
+an interview
+a video call on a screen
+a presentation with slides
+a meeting around a table
+a classroom
+a lecture hall
+a library
+studying at a desk
+typing on a laptop
+a computer screen
+a phone screen
+reading a book
+
+a knitting project
+painting a picture
+drawing in a sketchbook
+pottery on a wheel
+a sewing machine
+building with lego
+a jigsaw puzzle
+a board game on a table
+playing cards
+a video game on a television
+a chess board
+
+a car engine
+fixing a bicycle
+a construction site
+a crane lifting
+a tractor in a field
+a harvest in a field
+a vineyard
+a greenhouse
+a beach bonfire
+a barbecue grill
+
+a hospital room
+a newborn baby
+a doctor appointment
+a dentist chair
+a gym workout
+lifting weights
+a yoga class
+a running machine
+a bike on a turbo trainer
+a physiotherapy session
+
+a drone shot of countryside
+an aerial view of a city
+a time lapse of clouds
+a slow motion splash
+a black screen
+a title card with text
+a blurry out of focus shot
+a dark indoor scene
+a camera pointing at the floor
+a close up of hands
+a close up of feet
+a shot of the sky
+a reflection in a window
+a mirror selfie

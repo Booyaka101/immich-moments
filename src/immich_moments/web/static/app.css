@@ -1,0 +1,76 @@
+:root {
+  color-scheme: dark;
+  --bg: #14161a;
+  --panel: #1d2026;
+  --line: #2c313a;
+  --text: #e6e8ec;
+  --dim: #98a0ae;
+  --accent: #4098ff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+header {
+  padding: 24px 24px 16px;
+  border-bottom: 1px solid var(--line);
+}
+h1 { margin: 0 0 14px; font-size: 20px; font-weight: 600; letter-spacing: .2px; }
+form { display: flex; gap: 8px; max-width: 720px; }
+input[type=search] {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 15px;
+}
+input[type=search]:focus { outline: none; border-color: var(--accent); }
+button {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #08101c;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:disabled { opacity: .5; cursor: default; }
+.knob { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; color: var(--dim); font-size: 13px; }
+.knob input { width: 180px; }
+.stats { margin: 10px 0 0; color: var(--dim); font-size: 13px; }
+.model { opacity: .6; }
+main { padding: 20px 24px 60px; }
+.note { color: var(--dim); }
+#results { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.hit {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.hit img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; display: block; }
+.hit .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; }
+.hit .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.hit .at { font-variant-numeric: tabular-nums; font-weight: 600; }
+.hit .score { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+.hit .file { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.hit .label { font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #26303d;
+  color: #bcd6f5;
+}
+.said { color: var(--dim); font-size: 13px; font-style: italic; }
+.hit a { color: var(--accent); font-size: 13px; text-decoration: none; }
+.hit a:hover { text-decoration: underline; }
+.error { color: #ff8b7a; }

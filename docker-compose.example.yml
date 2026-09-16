@@ -1,0 +1,43 @@
+# Drop this next to your Immich stack: same folder as Immich's docker-compose.yml, same .env.
+# It joins Immich's own compose network, so it reaches the server and the ML container by
+# service name and nothing extra has to be published.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.example.yml up -d immich-moments
+#   docker compose -f docker-compose.yml -f docker-compose.example.yml run --rm immich-moments doctor
+#   docker compose -f docker-compose.yml -f docker-compose.example.yml run --rm immich-moments index
+#
+# Add IMMICH_API_KEY=... to the .env Immich already reads. Make the key in Immich under
+# Account Settings -> API Keys.
+
+services:
+  immich-moments:
+    container_name: immich_moments
+    image: ghcr.io/cbosch101/immich-moments:1.0.0
+    environment:
+      IMMICH_URL: http://immich-server:2283
+      IMMICH_API_KEY: ${IMMICH_API_KEY}
+      IMMICH_ML_URL: http://immich-machine-learning:3003
+      # Whisper on the CPU is roughly five times slower than real time on a small model.
+      # Use the cuda image and the deploy block below if you have an NVIDIA card.
+      IMMICH_MOMENTS_WHISPER_MODEL: small
+    volumes:
+      - immich-moments-data:/data
+    ports:
+      - 8099:8099
+    depends_on:
+      - immich-server
+      - immich-machine-learning
+    restart: always
+
+    # GPU transcription: use the -cuda image tag and uncomment.
+    # image: ghcr.io/cbosch101/immich-moments:1.0.0-cuda
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  immich-moments-data:

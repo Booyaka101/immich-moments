@@ -1,0 +1,11 @@
+include LICENSE
+include README.md
+include CHANGELOG.md
+include Dockerfile
+include docker-compose.example.yml
+recursive-include tests *.py *.wav *.json *.jpg
+recursive-include src/immich_moments/data *.txt
+recursive-include src/immich_moments/web/templates *.html
+recursive-include src/immich_moments/web/static *
+prune docs
+global-exclude __pycache__ *.py[cod]
