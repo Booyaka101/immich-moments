@@ -189,7 +189,7 @@ function render(data) {
   }
   const what = describe(data);
   if (!data.hits.length) {
-    hint.textContent = `Nothing matched ${what}. Try fewer words, or index more videos.`;
+    hint.textContent = `Nothing matched ${what}. Try fewer words, a wider range, or index more videos.`;
     return;
   }
   hint.textContent = `${data.count} scene${data.count === 1 ? "" : "s"} ${what}`;

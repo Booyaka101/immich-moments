@@ -366,7 +366,11 @@ def search(
         console.print_json(json.dumps([hit.as_dict(config.immich_url) for hit in hits]))
         raise typer.Exit(0 if hits else 1)
     if not hits:
-        console.print("[yellow]No scenes matched.[/] Index some videos first, or try fewer words.")
+        what = _describe(query, filters, reference)
+        console.print(
+            f"[yellow]No scenes matched{' ' + what if what else ''}.[/] "
+            "Try fewer words, a wider range, or index more videos."
+        )
         raise typer.Exit(1)
 
     table = Table(title=f"{len(hits)} scene(s) {_describe(query, filters, reference)}", header_style="bold")

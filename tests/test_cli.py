@@ -211,6 +211,21 @@ def test_a_date_range_reaches_the_filters(monkeypatch: pytest.MonkeyPatch, capsy
     assert (seen["filters"].since, seen["filters"].until) == ("2019-07-01", "2019-07-31")
 
 
+def test_an_empty_result_repeats_what_was_asked_for(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
+) -> None:
+    """A filter that leaves nothing looks like a broken index unless the message says otherwise."""
+    stub_clients(monkeypatch)
+    seed_index(tmp_path / "data", ["a garden"], person="Zoë")
+    capture_filters(monkeypatch)
+
+    code, _ = run("search", "--person", "Zoë", "--since", "2019-07-01", monkeypatch=monkeypatch)
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "with Zoë since 2019-07-01" in captured.out
+
+
 def test_a_day_that_is_not_a_date_is_a_sentence_not_a_stack_trace(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
