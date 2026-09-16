@@ -1,6 +1,6 @@
 # PROGRESS
 
-Status: v1.0.3 published. PyPI, GHCR and the GitHub repository are live.
+Status: v1.0.4 published. PyPI, GHCR and the GitHub repository are live.
 
 ## What exists
 
@@ -242,7 +242,7 @@ Every surface a user actually sees, gone over once with the current platform rat
 ## Distribution
 
 Published on the owner's instruction: `github.com/Booyaka101/immich-moments`,
-`pypi.org/project/immich-moments`, and `ghcr.io/booyaka101/immich-moments` on the v1.0.3 tag.
+`pypi.org/project/immich-moments`, and `ghcr.io/booyaka101/immich-moments` on the v1.0.4 tag.
 
 1.0.0 and 1.0.1 were uploaded to PyPI with the account token, because trusted publishing needs
 a pending publisher registered on pypi.org and that is a logged-in browser step. Registering it
