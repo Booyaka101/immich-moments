@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 1.0.5 - 2026-09-16
+
+### Fixed
+
+- Whisper uses the GPU in the `-cuda` image, and anywhere `immich-moments[cuda]` is installed
+  on Linux. The nvidia wheels keep their libraries inside site-packages, which the dynamic
+  loader does not search, so ctranslate2 reported `libcublas.so.12` missing and every run fell
+  back to the CPU with a warning. Windows has been handled since the first release; the same
+  now happens elsewhere, by opening those libraries by path before faster-whisper asks for
+  them. Three videos out of a test library transcribe in 2.2 seconds on a 4090 against 7.4 on
+  the CPU.
+
 ## 1.0.4 - 2026-09-16
 
 ### Changed

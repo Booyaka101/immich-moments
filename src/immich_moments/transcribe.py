@@ -8,6 +8,7 @@ out-of-memory error two hours into an overnight run.
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import logging
 import os
 import sys
@@ -84,7 +85,7 @@ class Transcriber:
 
     def _load(self):
         if self.device == "cuda":
-            add_cuda_dll_directories()
+            register_cuda_runtime()
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:  # pragma: no cover - dependency is declared
@@ -118,29 +119,47 @@ class Transcriber:
         return True
 
 
-def add_cuda_dll_directories() -> None:
-    """Make the pip-installed CUDA runtime visible to ctranslate2 on Windows.
+def register_cuda_runtime() -> None:
+    """Make the pip-installed CUDA runtime visible to ctranslate2.
 
-    `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` drop their DLLs inside site-packages rather
-    than anywhere the loader looks, so without this ctranslate2 reports `cublas64_12.dll is
-    not found` on a machine with a perfectly good GPU.
+    `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` drop their libraries inside site-packages
+    rather than anywhere the loader looks, so without this ctranslate2 reports `cublas64_12.dll
+    is not found` on Windows, or `libcublas.so.12 is not found` elsewhere, on a machine with a
+    perfectly good GPU.
     """
-    if sys.platform != "win32":
-        return
     try:
         import nvidia
     except ImportError:
         log.debug("no pip-installed CUDA runtime; relying on a system-wide one. %s", CUDA_HINT)
         return
-    found = [str(d) for root in nvidia.__path__ for d in Path(root).glob("*/bin") if d.is_dir()]
-    for directory in found:
+    roots = [Path(root) for root in nvidia.__path__]
+    if sys.platform == "win32":
+        _add_dll_directories([d for root in roots for d in root.glob("*/bin") if d.is_dir()])
+        return
+    _preload([lib for root in roots for lib in sorted(root.glob("*/lib/lib*.so.*"))])
+
+
+def _add_dll_directories(directories: list[Path]) -> None:
+    for directory in directories:
         with contextlib.suppress(OSError):
-            os.add_dll_directory(directory)
+            os.add_dll_directory(str(directory))
     # ctranslate2 loads cuBLAS with a plain LoadLibrary, which consults PATH and not the
     # directories add_dll_directory registers, so both are needed.
-    missing = [d for d in found if d not in os.environ.get("PATH", "").split(os.pathsep)]
+    on_path = os.environ.get("PATH", "").split(os.pathsep)
+    missing = [str(d) for d in directories if str(d) not in on_path]
     if missing:
         os.environ["PATH"] = os.pathsep.join([*missing, os.environ.get("PATH", "")])
+
+
+def _preload(libraries: list[Path]) -> None:
+    """Load each library by path, which is what lets a later dlopen find it by soname.
+
+    The loader would otherwise want LD_LIBRARY_PATH, and that is read at exec, too late for
+    anything this process can set.
+    """
+    for library in libraries:
+        with contextlib.suppress(OSError):
+            ctypes.CDLL(str(library), mode=ctypes.RTLD_GLOBAL)
 
 
 def _cuda_available() -> bool:

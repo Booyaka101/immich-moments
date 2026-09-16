@@ -1,6 +1,6 @@
 # PROGRESS
 
-Status: v1.0.4 published. PyPI, GHCR and the GitHub repository are live.
+Status: v1.0.5 published. PyPI, GHCR and the GitHub repository are live.
 
 ## What exists
 
@@ -42,7 +42,7 @@ footage, 8 named people.
 | `doctor` on a failed video | lists it by name with the ffmpeg error, and still exits 0 |
 | `--album` and the album menu | made two albums in Immich over 6 and 2 of the 16 videos, one `index` run picked both up in 0.1s, `search --album "Night shoots"` returned only that album's scenes, and the UI round-trips `?q=...&album=Night+shoots` |
 
-Test suite: 286 passed, including the two slow tests that really run Whisper. The fast subset
+Test suite: 287 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Measured at scale
@@ -242,7 +242,7 @@ Every surface a user actually sees, gone over once with the current platform rat
 ## Distribution
 
 Published on the owner's instruction: `github.com/Booyaka101/immich-moments`,
-`pypi.org/project/immich-moments`, and `ghcr.io/booyaka101/immich-moments` on the v1.0.4 tag.
+`pypi.org/project/immich-moments`, and `ghcr.io/booyaka101/immich-moments` on the v1.0.5 tag.
 
 1.0.0 and 1.0.1 were uploaded to PyPI with the account token, because trusted publishing needs
 a pending publisher registered on pypi.org and that is a logged-in browser step. Registering it

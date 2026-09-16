@@ -9,6 +9,8 @@ fails when the first batch reaches cuBLAS.
 from __future__ import annotations
 
 import subprocess
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -16,7 +18,7 @@ import pytest
 from immich_moments.config import Config
 from immich_moments.errors import MomentsError
 from immich_moments.media import extract_audio
-from immich_moments.transcribe import Transcriber, add_cuda_dll_directories
+from immich_moments.transcribe import Transcriber, register_cuda_runtime
 
 from conftest import SEGMENT_SECONDS, SENTENCE, SPEECH_START, ffmpeg
 
@@ -188,8 +190,28 @@ def test_unload_drops_the_model_so_the_gpu_is_free_for_the_next_phase(config: Co
 
 
 def test_registering_the_cuda_runtime_is_harmless_when_it_is_absent() -> None:
-    add_cuda_dll_directories()
-    add_cuda_dll_directories()  # idempotent: PATH must not grow without bound
+    register_cuda_runtime()
+    register_cuda_runtime()  # idempotent: PATH must not grow without bound
+
+
+def test_the_pip_installed_cuda_libraries_are_loaded_by_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Off Windows the loader ignores site-packages, so they have to be opened by full path."""
+    lib = tmp_path / "cublas" / "lib"
+    lib.mkdir(parents=True)
+    (lib / "libcublas.so.12").touch()
+    (lib / "cublas.h").touch()
+    nvidia = types.ModuleType("nvidia")
+    nvidia.__path__ = [str(tmp_path)]
+    monkeypatch.setitem(sys.modules, "nvidia", nvidia)
+    monkeypatch.setattr("sys.platform", "linux")
+    opened: list[str] = []
+    monkeypatch.setattr("ctypes.CDLL", lambda path, mode=0: opened.append(path))
+
+    register_cuda_runtime()
+
+    assert opened == [str(lib / "libcublas.so.12")]
 
 
 # ---- the real thing ------------------------------------------------------
