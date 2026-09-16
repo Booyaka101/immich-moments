@@ -142,7 +142,10 @@ jobs:
           # is the nvidia wheels, so ask each image whether it has them.
           wheels="import importlib.util; print(importlib.util.find_spec('nvidia') is not None)"
           test "$(docker run --rm --entrypoint python "$image:latest" -c "$wheels")" = False
-          test "$(docker run --rm --entrypoint python "$image:$version-cuda" -c "$wheels")" = True
+          # The GPU image also has to be able to load them. They install into site-packages,
+          # which the dynamic loader does not search, and a GPU is not needed to find that out.
+          loads="import ctypes; from immich_moments.transcribe import register_cuda_runtime; register_cuda_runtime(); ctypes.CDLL('libcublas.so.12')"
+          docker run --rm --entrypoint python "$image:$version-cuda" -c "$loads"
 
           # Running the CLI inside the image catches a runtime dependency missing from the
           # image itself, which a test suite running against the source cannot see.
