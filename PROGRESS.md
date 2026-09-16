@@ -31,10 +31,13 @@ footage, 8 named people.
 | second `--write-back` | nothing to change |
 | Immich description search | finds the written block, `/api/search/metadata` returns the video |
 | Immich smart search | does not find it, which is the gap this closes |
-| clean wheel install | `immich-moments doctor` and `search` work from a fresh venv |
+| clean wheel install | `doctor`, `search` and the date range all work from a fresh venv |
+| `--since` / `--until` | drops the videos outside the range and rescales the scores against what is left |
+| `--like` and "more like this" | 0.984 top cosine against scene 103, and the UI round-trips `?like=103&person=Martin` |
+| `relabel` | the default vocabulary moves nothing, a six-phrase one moves 209 of 210 scenes and back |
 | Docker image | builds, runs, `doctor` passes on Immich's own compose network |
 
-Test suite: 229 passed, including the two slow tests that really run Whisper. The fast subset
+Test suite: 243 passed, including the two slow tests that really run Whisper. The fast subset
 also passes from an unpacked sdist in a clean 3.12 venv, which is what CI checks.
 
 ## Known limits, written down rather than hidden
@@ -95,21 +98,55 @@ them was believed.
   to a six-phrase vocabulary and back again, with every label identical afterwards and the
   scores within float32 epsilon.
 
-## Features considered and not built
+## Final review pass
 
-Kept out of 1.0 deliberately. Each is a real want, none is needed to ship.
+A line by line re-read of the brief against the build, after the enhancements above.
 
-- Speaker diarisation, so the description could say who said a line. Needs pyannote, a
-  Hugging Face token and a licence click, which conflicts with shipping no weights.
-- OCR over scene frames, for title cards and signs. Cheap to add with the same `/predict`
-  plumbing, but a second model download.
-- A deep link into Immich at a timestamp. Immich has no such URL today.
-- Album filters. Albums are the one thing the index does not carry; person filters shipped
-  because the faces were already there.
-- A relevance test set, so the blend weight could be tuned rather than argued.
-- A score floor, so a query nothing matches prints nothing instead of the library's best
-  guess at 0.25. The score column already says so, and a badly chosen floor would hide real
-  speech-led hits, which land near 0.35.
+### Where the build differs from the brief, stated rather than hidden
+
+- The stack line offers "PyAV or ffmpeg-python". Frames and audio go through `ffmpeg` and
+  `ffprobe` as subprocesses instead. ffmpeg-python is a thin argv builder over the same call
+  and has had no release since 2022, and PyAV would ship a second FFmpeg build beside the one
+  OpenCV already carries for scene detection. The README lists both binaries as requirements
+  and a missing one is exit code 5 with the binary named in the message.
+- `doctor` round-trips a person thumbnail through `/predict` rather than "one known photo". It
+  is a real image from the library, and it is the one image Immich hands back without
+  downloading an entire original first.
+- There is a fifth command, `relabel`, which the brief does not ask for. It only re-reads
+  vectors that are already in the index, so it cannot invent anything the index does not have.
+- The worked example is one 14-minute video with 31 scenes. The live run was 16 videos, 31
+  minutes and 210 scenes, which answers the acceptance bar of at least ten videos rather than
+  the example itself.
+
+Everything else the brief names is present: the five REST endpoints, the three `/predict`
+entry shapes, the schema tables (`assets`, `scenes`, `scene_faces`, `people_refs`,
+`transcript_segments` as FTS5, `run_state`), the 0.65/0.35 default blend, the fenced
+description block replaced rather than appended, every edge case in the EDGE CASES paragraph
+with a test each, and every assertion the TESTS paragraph asks for.
+
+### What is missing, and what was built because it was cheap
+
+Built in this round, because each was a small diff against something that already existed:
+the person filter, `--json`, `--like`, `relabel`, and the `--since` / `--until` range. The
+range in particular is one more clause on the `Filters` object, so it narrows the vectors, the
+transcript and "more like this" without any of them knowing that dates exist.
+
+Left out, with the reason, in the order I would build them next.
+
+1. Album filters. The index carries people because the faces were already being fetched; it
+   carries no album membership. One `GET /api/albums` plus one call per album at discovery
+   time would fix that, and it is the filter people will ask for after dates.
+2. A relevance test set. Twenty hand-judged queries would turn the blend weight from a
+   defensible number into a measured one. Nothing else here is guesswork, and this is.
+3. OCR over the scene frame, for title cards and signs. Same `/predict` plumbing, but it is a
+   second model the user has to have pulled.
+4. Speaker diarisation, so a description could say who said a line. pyannote needs a Hugging
+   Face token and a licence click, which conflicts with shipping no weights.
+5. A deep link into Immich at a timestamp. Immich has no such URL today, so the link opens the
+   asset and the timestamp is printed beside it.
+6. A score floor. A query nothing matches still prints the library's best guess. The score
+   column says so, and a badly chosen floor would hide the speech-led hits that land near
+   0.35.
 
 ## Distribution
 
