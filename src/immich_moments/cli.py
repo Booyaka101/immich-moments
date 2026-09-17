@@ -31,6 +31,7 @@ from .faces import pad_thumbnail
 from .immich import ImmichClient
 from .indexer import run_index
 from .labels import build_label_index
+from .media import ffmpeg_path, ffprobe_path, has_zscale
 from .ml import MLClient
 from .search import Filters, Hit, date_range, resolve_albums, resolve_people, visual_reference
 from .search import search as run_search
@@ -93,6 +94,31 @@ def _clients(config: Config) -> tuple[ImmichClient, MLClient, str, str]:
     return immich, MLClient(config, clip_model, face_model), clip_model, face_model
 
 
+BAD = "[red]!![/]"
+
+
+def _ffmpeg_rows() -> list[tuple[str, str, str]]:
+    """The one prerequisite that is not a Python dependency, so the one most likely missing.
+
+    Without it every other check passes and the first index run is what tells you.
+    """
+    try:
+        ffprobe_path()
+        rows = [("[green]OK[/]", "ffmpeg", ffmpeg_path())]
+    except MomentsError as exc:
+        return [(BAD, "ffmpeg", str(exc))]
+    if not has_zscale():
+        rows.append(
+            (
+                "[yellow]--[/]",
+                "HDR tone mapping",
+                "this ffmpeg has no zscale filter, so frames grabbed from HDR video keep the "
+                "flat washed out colours CLIP then sees",
+            )
+        )
+    return rows
+
+
 @app.command()
 def doctor(
     config_path: ConfigOption = None,
@@ -102,6 +128,12 @@ def doctor(
     config = _setup(config_path, verbose)
     table = Table(show_header=False, box=None, pad_edge=False)
     ok = True
+
+    rows = _ffmpeg_rows()
+    for row in rows:
+        table.add_row(*row)
+    if any(row[0] == BAD for row in rows):
+        ok = False
 
     immich = ImmichClient(config)
     with immich:

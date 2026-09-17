@@ -17,9 +17,9 @@ from typer.testing import CliRunner
 
 from immich_moments import __version__
 from immich_moments import cli as cli_module
-from immich_moments.cli import app, main
+from immich_moments.cli import _ffmpeg_rows, app, main
 from immich_moments.config import Config
-from immich_moments.errors import ConfigError, ImmichError, StorageError
+from immich_moments.errors import ConfigError, ImmichError, MediaError, StorageError
 from immich_moments.labels import LabelIndex
 from immich_moments.search import Hit
 from immich_moments.store import FaceRecord, SceneRecord, Store
@@ -59,6 +59,39 @@ def test_bare_invocation_shows_the_commands() -> None:
     assert result.exit_code == 2  # click's code for "pick a command"
     for command in ("doctor", "index", "search", "serve"):
         assert command in result.stdout
+
+
+def test_doctor_says_when_ffmpeg_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every other check passes without it, and the first index run is what tells you."""
+    monkeypatch.setattr(
+        "immich_moments.cli.ffprobe_path",
+        lambda: (_ for _ in ()).throw(MediaError("ffprobe is not on PATH. It ships with ffmpeg")),
+    )
+
+    rows = _ffmpeg_rows()
+
+    assert [row[0] for row in rows] == ["[red]!![/]"]
+    assert "ffprobe is not on PATH" in rows[0][2]
+
+
+def test_doctor_says_when_ffmpeg_cannot_tone_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A build without libzimg indexes HDR video at the wrong colours rather than failing."""
+    monkeypatch.setattr("immich_moments.cli.ffprobe_path", lambda: "/usr/bin/ffprobe")
+    monkeypatch.setattr("immich_moments.cli.ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("immich_moments.cli.has_zscale", lambda: False)
+
+    rows = _ffmpeg_rows()
+
+    assert [row[0] for row in rows] == ["[green]OK[/]", "[yellow]--[/]"]
+    assert "zscale" in rows[1][2]
+
+
+def test_a_working_ffmpeg_is_one_quiet_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("immich_moments.cli.ffprobe_path", lambda: "/usr/bin/ffprobe")
+    monkeypatch.setattr("immich_moments.cli.ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("immich_moments.cli.has_zscale", lambda: True)
+
+    assert _ffmpeg_rows() == [("[green]OK[/]", "ffmpeg", "/usr/bin/ffmpeg")]
 
 
 def test_missing_credentials_name_the_variable(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
