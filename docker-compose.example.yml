@@ -12,7 +12,7 @@
 services:
   immich-moments:
     container_name: immich_moments
-    image: ghcr.io/booyaka101/immich-moments:1.2.0
+    image: ghcr.io/booyaka101/immich-moments:1.2.1
     environment:
       IMMICH_URL: http://immich-server:2283
       # Where your browser reaches Immich. IMMICH_URL above is a service name, which resolves
@@ -34,7 +34,7 @@ services:
     restart: always
 
     # GPU transcription: use the -cuda image tag and uncomment.
-    # image: ghcr.io/booyaka101/immich-moments:1.2.0-cuda
+    # image: ghcr.io/booyaka101/immich-moments:1.2.1-cuda
     # deploy:
     #   resources:
     #     reservations:
