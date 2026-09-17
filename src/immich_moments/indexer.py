@@ -175,11 +175,12 @@ class Indexer:
         from .transcribe import Transcriber
 
         needing = self.store.assets_needing("audio")
-        pending = [asset for asset in needing if asset["visual_indexed_at"] is not None][: limit or None]
+        ready = [asset for asset in needing if asset["visual_indexed_at"] is not None]
+        # The visual pass writes the 16 kHz sidecar while it already has the video open, so
+        # `--phase audio` has nothing to read for a video that has never had one.
+        report.speech_needs_visual = len(ready) < len(needing)
+        pending = ready[: limit or None]
         if not pending:
-            # The visual pass writes the 16 kHz sidecar while it already has the video open, so
-            # `--phase audio` on a library that has never had one has nothing to read.
-            report.speech_needs_visual = bool(needing)
             return
         transcriber = Transcriber(self.config)
         timing = report.timing("speech")

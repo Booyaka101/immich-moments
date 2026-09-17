@@ -22,7 +22,7 @@ from immich_moments.errors import MediaError
 from immich_moments.immich import ImmichClient
 from immich_moments.indexer import Indexer, IndexReport, _duration, run_index
 from immich_moments.ml import MLClient
-from immich_moments.store import Store, TranscriptRecord
+from immich_moments.store import Store, TranscriptRecord, VectorFile
 
 from conftest import COLOURS, SEGMENT_SECONDS
 
@@ -323,6 +323,30 @@ def test_speech_on_its_own_says_why_it_did_nothing(config: Config, store: Store,
     assert report.audio_indexed == 0
     assert report.speech_needs_visual is True
     assert transcriber.seen == []
+
+
+def test_a_video_the_visual_pass_has_not_reached_is_still_reported(config: Config, store: Store) -> None:
+    """Half a library indexed is the ordinary case, and the half that was skipped went unsaid."""
+    store.check_model("test-clip", DIM, reindex=False)
+    for asset_id, name in (("ready", "done.mp4"), ("raw", "new.mp4")):
+        store.upsert_asset(
+            asset_id,
+            original_file_name=name,
+            file_created_at="2026-06-01T12:00:00Z",
+            updated_at="2026-06-01T12:00:00Z",
+            duration_seconds=10.0,
+        )
+    store.replace_scenes("ready", [], VectorFile(config.vectors_path, DIM), indexed_at="2026-06-01T12:00:00Z")
+
+    report = IndexReport()
+    with (
+        patch("immich_moments.transcribe.Transcriber", lambda _config: SilentTranscriber()),
+        patch.object(Indexer, "_index_one_audio", return_value=0) as transcribed,
+    ):
+        Indexer(config, store, None, None).audio_pass(report)
+
+    assert report.speech_needs_visual is True
+    assert [call.args[0] for call in transcribed.call_args_list] == ["ready"]
 
 
 def test_a_missing_sidecar_is_taken_from_the_original_again(

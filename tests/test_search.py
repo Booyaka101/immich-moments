@@ -21,10 +21,12 @@ from immich_moments.ml import MLClient
 from immich_moments.search import (
     REFERENCE_PHRASES,
     Filters,
+    Hit,
     browse,
     date_range,
     format_timestamp,
     fts_query,
+    nothing_close,
     resolve_albums,
     resolve_people,
     search,
@@ -334,10 +336,40 @@ def test_a_person_filter_reaches_the_speech_channel_too(seeded: Store, config: C
 
 
 def test_a_person_matches_whatever_case_you_type(seeded: Store, config: Config) -> None:
+    """The resolver folds case, so the filter itself can match the index spelling exactly."""
+    people = resolve_people(seeded, ["  aNNa "])
     with ml_returning(config, CANDLES) as ml:
-        hits = search(seeded, ml, "candles", visual_weight=1.0, filters=Filters(people=("  aNNa ",)))
+        hits = search(seeded, ml, "candles", visual_weight=1.0, filters=Filters(people=tuple(people)))
 
+    assert people == ["Anna"]
     assert [hit.scene_index for hit in hits] == [1]
+
+
+def test_a_name_outside_ascii_reaches_its_scenes(seeded: Store, config: Config) -> None:
+    """SQLite's lower() leaves accented letters alone, so folding case in SQL matched nothing."""
+    seeded.replace_scenes(
+        "garden",
+        [
+            SceneRecord(
+                0,
+                0.0,
+                10.0,
+                vector=GARDEN,
+                label="a garden",
+                faces=[FaceRecord("p3", "Émile", 0.2, 0.99, (1, 2, 3, 4))],
+            )
+        ],
+        VectorFile(config.vectors_path, DIM),
+        indexed_at=NOW,
+    )
+    seeded.replace_albums([("garden", "al1", "Été 2026")])
+
+    people = resolve_people(seeded, ["  émile "])
+    albums = resolve_albums(seeded, ["été 2026"])
+
+    assert (people, albums) == (["Émile"], ["Été 2026"])
+    assert [hit.asset_id for hit in browse(seeded, Filters(people=tuple(people)))] == ["garden"]
+    assert [hit.asset_id for hit in browse(seeded, Filters(albums=tuple(albums)))] == ["garden"]
 
 
 def test_a_filter_with_no_query_browses_without_asking_the_model(seeded: Store, config: Config) -> None:
@@ -656,3 +688,56 @@ def test_a_locked_database_costs_the_cache_not_the_search(
         assert visual_reference(seeded, ml) == pytest.approx(
             float(max(LUKEWARM @ v for v in (CANDLES, CAKE, TABLE, GARDEN)))
         )
+
+
+def a_hit(visual_score: float, *, spoken: bool = False) -> Hit:
+    """One hit at a chosen cosine, which is all the claim turns on."""
+    return Hit(
+        scene_id=1,
+        asset_id="birthday",
+        original_file_name="birthday.mp4",
+        scene_index=0,
+        file_created_at=NOW,
+        start_seconds=0.0,
+        end_seconds=10.0,
+        label=None,
+        label_score=None,
+        thumb_path=None,
+        visual_score=visual_score,
+        text_score=1.0 if spoken else 0.0,
+        score=0.5,
+        spoken_at_seconds=1.0 if spoken else None,
+    )
+
+
+def test_words_that_matched_are_an_answer_whatever_the_frames_scored(seeded: Store, config: Config) -> None:
+    """The claim is about the picture, and a scene the transcript found is a real hit."""
+    with ml_by_phrase(config, {}, LUKEWARM) as ml:
+        hits = search(seeded, ml, "happy birthday", visual_weight=0.65)
+        floor = visual_reference(seeded, ml)
+
+        assert any(hit.spoken_at_seconds is not None for hit in hits)
+        assert max(hit.visual_score for hit in hits) <= floor
+        assert nothing_close(seeded, ml, hits, Filters(), 0.65) is False
+
+
+def test_the_strongest_scene_is_what_the_claim_is_measured_against(seeded: Store, config: Config) -> None:
+    """The blend decides the order, so the top hit is not always the one CLIP liked most."""
+    with ml_by_phrase(config, {}, LUKEWARM) as ml:
+        floor = visual_reference(seeded, ml)
+        hits = [a_hit(floor - 0.01), a_hit(floor + 0.01)]
+
+        assert nothing_close(seeded, ml, hits[:1], Filters(), 0.65) is True
+        assert nothing_close(seeded, ml, hits, Filters(), 0.65) is False
+
+
+def test_a_filtered_search_makes_no_claim_about_the_library(seeded: Store, config: Config) -> None:
+    """The floor is measured over every scene, so a handful of them score under it either way."""
+    with ml_by_phrase(config, {}, LUKEWARM) as ml:
+        floor = visual_reference(seeded, ml)
+        hits = [a_hit(floor - 0.01)]
+
+        assert nothing_close(seeded, ml, hits, Filters(), 0.65) is True
+        assert nothing_close(seeded, ml, hits, Filters(people=("Anna",)), 0.65) is False
+        # Weight 0 never looks at a vector, so every cosine here is an unset field.
+        assert nothing_close(seeded, ml, hits, Filters(), 0.0) is False

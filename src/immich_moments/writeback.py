@@ -12,7 +12,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 
-from .errors import AssetUnavailable
+from .errors import AssetUnavailable, ImmichError
 from .immich import Annotations, ImmichClient
 from .search import format_timestamp, unique_names
 from .store import Store
@@ -187,7 +187,17 @@ def write_back(store: Store, immich: ImmichClient, asset_ids: list[str], *, dry_
         result.assets_tagged += immich.bulk_tag_assets([tag_id], assets)
 
     for plan in plans:
-        if plan.description_changed:
+        if not plan.description_changed:
+            continue
+        try:
             immich.update_asset(plan.asset_id, description=plan.description)
-            result.descriptions_written += 1
+        except ImmichError as exc:
+            # Deleted between the plan and the write. Losing one description is not a reason
+            # to abandon the rest of the run, and the plan phase already tolerates this.
+            if exc.status not in (404, 410):
+                raise
+            log.warning("%s", exc)
+            skipped.append(store.asset(plan.asset_id)["original_file_name"])
+            continue
+        result.descriptions_written += 1
     return result
