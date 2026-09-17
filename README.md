@@ -51,7 +51,8 @@ description, so the moments are findable from Immich's own search bar too.
 - Immich's machine-learning container reachable on its own port, usually 3003
 - ffmpeg and ffprobe on PATH
 - Python 3.12 or newer
-- A GPU is optional. Whisper on the CPU works, at roughly a fifth of real time on `small`.
+- A GPU is optional. On `small`, Whisper transcribed 26 minutes of audio in 74 seconds on a
+  desktop CPU, model load included. A GPU makes that faster, not possible.
 
 ## Install
 

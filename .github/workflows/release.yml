@@ -175,3 +175,37 @@ jobs:
           done
           test "$(/tmp/fresh/bin/immich-moments --version)" = "$version"
           /tmp/fresh/bin/immich-moments doctor --help > /dev/null
+
+  # 1.1.1 went to PyPI and GHCR while the Releases page still said 1.1.0, because cutting the
+  # notes was a thing someone remembered to do by hand. The body is the CHANGELOG entry for the
+  # tag, which has to exist anyway.
+  notes:
+    needs: [published-image, published-package]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          python - "$version" "$image" > /tmp/notes.md <<'PY'
+          import re, sys
+
+          version, image = sys.argv[1], sys.argv[2]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          entry = re.search(rf"^## {re.escape(version)} - .*?$(.*?)(?=^## |\Z)", text, re.S | re.M)
+          assert entry, f"CHANGELOG.md has no entry for {version}"
+          print(entry.group(1).strip())
+          print(f"\n```\ndocker pull {image}:{version}\npip install -U immich-moments\n```")
+          PY
+          # Re-running a release must not fail on notes that are already up there.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file /tmp/notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$version" --latest --notes-file /tmp/notes.md
+          fi
