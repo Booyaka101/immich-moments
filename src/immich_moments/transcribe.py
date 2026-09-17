@@ -75,13 +75,17 @@ class Transcriber:
         ]
 
     def _placement(self) -> tuple[str, str]:
+        # The compute type follows the device it lands on, not how that device was chosen.
+        # Leaving it to ctranslate2 makes an explicit whisper_device=cpu slower than letting
+        # the same CPU be picked automatically: it reads float16 off the checkpoint and
+        # settles for float32.
         device = self.config.whisper_device
+        if device == "auto":
+            device = "cuda" if _cuda_available() else "cpu"
         compute = self.config.whisper_compute_type
-        if device != "auto":
-            return device, ("default" if compute == "default" else compute)
-        if _cuda_available():
-            return "cuda", ("float16" if compute == "default" else compute)
-        return "cpu", ("int8" if compute == "default" else compute)
+        if compute == "default":
+            compute = "float16" if device == "cuda" else "int8"
+        return device, compute
 
     def _load(self):
         if self.device == "cuda":

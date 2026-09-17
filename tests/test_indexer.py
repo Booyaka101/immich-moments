@@ -298,6 +298,33 @@ def audio_pass(config: Config, store: Store, video: Path, transcriber, *, missin
     return report
 
 
+def test_speech_on_its_own_says_why_it_did_nothing(config: Config, store: Store, colour_video: Path) -> None:
+    """`index --phase audio` before any visual pass has no sidecar to read, and said so with a 0."""
+    store.check_model("test-clip", DIM, reindex=False)
+    transcriber = SilentTranscriber()
+    with (
+        ImmichClient(config, transport=immich_transport(colour_video)) as immich,
+        MLClient(config, "test-clip", "test-faces", transport=ml_transport()) as ml,
+        patch("immich_moments.transcribe.Transcriber", lambda _config: transcriber),
+    ):
+        report = run_index(
+            config,
+            store,
+            immich,
+            ml,
+            since=None,
+            limit=None,
+            phases=("audio",),
+            labels_path=None,
+            reindex=False,
+        )
+
+    assert report.discovered == 1
+    assert report.audio_indexed == 0
+    assert report.speech_needs_visual is True
+    assert transcriber.seen == []
+
+
 def test_a_missing_sidecar_is_taken_from_the_original_again(
     config: Config, store: Store, colour_video: Path, labels_file: Path
 ) -> None:
@@ -311,6 +338,7 @@ def test_a_missing_sidecar_is_taken_from_the_original_again(
 
     assert report.segments == 1
     assert report.no_audio_track == 0
+    assert report.speech_needs_visual is False
     assert transcriber.seen == [sidecar]
     assert store.asset(ASSET_ID)["has_audio"] == 1
     assert not sidecar.exists()  # tidied up once it has been read

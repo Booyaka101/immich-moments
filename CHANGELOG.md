@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Setting `whisper_device=cpu` was slower than letting the same CPU be picked automatically.
+  The compute type was left to ctranslate2, which read float16 off the checkpoint and settled
+  for float32, printing a warning on the way. It now follows the device it lands on, the way
+  the automatic path and the GPU fallback already did. Over 28 minutes of audio on `small`
+  that is 40 seconds instead of 74.
+- `index --phase audio` before any visual pass did nothing and reported a zero. The visual
+  pass is what writes the audio speech reads, and the run now says so.
+- The example compose file published the web UI on every interface. It has no auth, which the
+  README says, so it now binds to `127.0.0.1`.
+- Seven settings existed and were documented nowhere: `whisper_compute_type`,
+  `whisper_beam_size`, `host`, `request_timeout`, `download_timeout`, `max_retries` and
+  `min_request_interval`. `host` is the one the README told you to use without naming.
 - The README said Whisper on the CPU runs at "roughly a fifth of real time", which reads as
   either five times faster or five times slower than the video. Measured on `small`: 26
   minutes of audio in 74 seconds, model load included.

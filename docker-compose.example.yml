@@ -26,7 +26,8 @@ services:
     volumes:
       - immich-moments-data:/data
     ports:
-      - 8099:8099
+      # The UI has no auth, so it is published to this machine only. Widen it deliberately.
+      - 127.0.0.1:8099:8099
     depends_on:
       - immich-server
       - immich-machine-learning

@@ -69,13 +69,14 @@ def config(tmp_path: Path) -> Config:
 @pytest.mark.parametrize(
     ("device", "compute", "expected"),
     [
-        ("cpu", "default", ("cpu", "default")),
+        ("cpu", "default", ("cpu", "int8")),
         ("cpu", "int8", ("cpu", "int8")),
-        ("cuda", "default", ("cuda", "default")),
+        ("cpu", "float32", ("cpu", "float32")),
+        ("cuda", "default", ("cuda", "float16")),
         ("cuda", "float32", ("cuda", "float32")),
     ],
 )
-def test_an_explicit_device_is_taken_as_given(
+def test_an_explicit_device_gets_that_devices_compute_default(
     config: Config, device: str, compute: str, expected: tuple[str, str]
 ) -> None:
     config.whisper_device = device
