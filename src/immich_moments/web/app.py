@@ -18,7 +18,7 @@ from ..config import Config
 from ..errors import ConfigError, MomentsError
 from ..immich import ImmichClient
 from ..ml import MLClient
-from ..search import Filters, date_range, resolve_albums, resolve_people, visual_reference
+from ..search import Filters, date_range, nothing_close, resolve_albums, resolve_people
 from ..search import search as run_search
 from ..search import similar as run_similar
 from ..store import Store
@@ -114,7 +114,7 @@ def create_app(
         # A search is an HTTP call to the ML container and then SQLite, both blocking. On the event
         # loop it would freeze the page and every thumbnail behind one query.
         reference = None
-        nothing_close = False
+        no_answer = False
         blend = config.visual_weight if weight is None else weight
         async with state.searching:
             try:
@@ -141,9 +141,9 @@ def create_app(
                         visual_weight=blend,
                         filters=filters,
                     )
-                    if hits and blend > 0:
-                        floor = await run_in_threadpool(visual_reference, state.store, state.ml)
-                        nothing_close = floor is not None and hits[0].visual_score <= floor
+                    no_answer = await run_in_threadpool(
+                        nothing_close, state.store, state.ml, hits, filters, blend
+                    )
             except ConfigError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
@@ -155,7 +155,7 @@ def create_app(
             "like": reference.as_dict(config.browser_url) if reference else None,
             "weight": blend,
             "count": len(hits),
-            "nothing_close": nothing_close,
+            "nothing_close": no_answer,
             "hits": [hit.as_dict(config.browser_url) for hit in hits],
         }
 

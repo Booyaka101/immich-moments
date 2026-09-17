@@ -498,7 +498,7 @@ def canned_search(monkeypatch: pytest.MonkeyPatch, visual_score: float, floor: f
         score=0.5,
     )
     monkeypatch.setattr("immich_moments.cli.run_search", lambda *_args, **_kw: [hit])
-    monkeypatch.setattr("immich_moments.cli.visual_reference", lambda *_args: floor)
+    monkeypatch.setattr("immich_moments.search.visual_reference", lambda *_args: floor)
 
 
 def test_a_query_with_no_answer_says_so_above_the_results(

@@ -12,6 +12,25 @@ All notable changes to this project are documented here. The format follows
   passed without it and the first `index` run was what told you. It also flags an ffmpeg
   built without zscale, which grabs HDR frames at the wrong colours rather than failing.
 
+### Fixed
+
+- `--person` and `--album` matched nothing for any name holding a letter outside ASCII.
+  The filter folded case in SQL, and SQLite's `lower()` leaves `É` alone, so a name the
+  resolver had already accepted came back with zero scenes and no error. Names arrive
+  resolved to the index's own spelling, so the filter now matches them exactly.
+- "Nothing in your library looks much like that" could appear above an exact spoken match.
+  It read the top hit's cosine, which is 0 for a scene the transcript found and the visual
+  channel never scored. It now takes the strongest scene in the results, and says nothing at
+  all when the words matched or when a filter is on, because the floor it compares against is
+  measured over the whole library.
+- `index --phase audio` on a part-indexed library transcribed what it could and said nothing
+  about the rest. The "speech skipped" row only appeared when every video was skipped.
+- A video trashed in Immich between the write-back plan and the write abandoned every
+  description behind it. The plan phase had always tolerated one going away; now the write
+  phase does too.
+- Falling back from the GPU to the CPU discarded an explicitly set `whisper_compute_type`.
+  Only the `default` sentinel means "whatever suits the device".
+
 ## 1.2.1 - 2026-09-17
 
 ### Fixed

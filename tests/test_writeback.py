@@ -23,8 +23,9 @@ ASSET = "birthday"
 class FakeImmich:
     """Just enough of the server to answer a write-back, recording every request it is sent."""
 
-    def __init__(self, description: str = "") -> None:
+    def __init__(self, description: str = "", trashed_before_write: frozenset[str] = frozenset()) -> None:
         self.descriptions = {ASSET: description}
+        self.trashed_before_write = trashed_before_write
         self.tags: dict[str, str] = {}
         self.assigned: dict[str, list[str]] = {}
         self.requests: list[tuple[str, str]] = []
@@ -60,8 +61,11 @@ class FakeImmich:
                 self.assigned.setdefault(tag_id, []).extend(body["assetIds"])
             return httpx.Response(200, json={"count": len(body["assetIds"])})
         if request.method == "PUT" and path.startswith("/api/assets/"):
-            self.descriptions[path.rsplit("/", 1)[-1]] = body["description"]
-            return httpx.Response(200, json={"id": ASSET})
+            asset_id = path.rsplit("/", 1)[-1]
+            if asset_id in self.trashed_before_write:
+                return httpx.Response(404, json={"message": "Not found"})
+            self.descriptions[asset_id] = body["description"]
+            return httpx.Response(200, json={"id": asset_id})
         raise AssertionError(f"unexpected {request.method} {path}")
 
     @property
@@ -355,3 +359,27 @@ def test_a_video_gone_from_immich_is_skipped_not_fatal(seeded: Store, config: Co
     assert result.skipped == ["gone.mp4"]
     assert [plan.asset_id for plan in result.planned] == [ASSET]
     assert result.descriptions_written == 1
+
+
+def test_a_video_trashed_between_the_plan_and_the_write_costs_only_its_own(
+    seeded: Store, config: Config
+) -> None:
+    """It is there when the plan reads it and gone when the write lands. The plan phase has
+    always tolerated that; the write phase abandoned every description behind it."""
+    seeded.upsert_asset("gone", original_file_name="gone.mp4", file_created_at=NOW, updated_at=NOW)
+    seeded.replace_scenes(
+        "gone",
+        [SceneRecord(0, 0.0, 5.0, vector=unit(3, DIM), label="a dog")],
+        VectorFile(config.vectors_path, DIM),
+        indexed_at=NOW,
+    )
+    server = FakeImmich(trashed_before_write=frozenset({"gone"}))
+    server.descriptions["gone"] = ""
+
+    with server.client(config) as immich:
+        result = write_back(seeded, immich, ["gone", ASSET], dry_run=False)
+
+    assert result.skipped == ["gone.mp4"]
+    assert [plan.asset_id for plan in result.planned] == ["gone", ASSET]
+    assert result.descriptions_written == 1
+    assert BEGIN in server.descriptions[ASSET]

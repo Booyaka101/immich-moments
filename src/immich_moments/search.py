@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import date
@@ -75,17 +75,19 @@ class Filters:
             clauses.append(f"{asset_column} = ?")
             params.append(self.asset_id)
         # One clause each, so two names mean both people in the same scene rather than either.
+        # Names arrive resolved to the index's own spelling, so the match is exact. Folding
+        # case here would be SQLite's lower(), which leaves "Émile" exactly as it found it.
         for name in self.people:
             clauses.append(
-                f"{scene_column} IN (SELECT scene_id FROM scene_faces WHERE lower(person_name) = ?)"  # noqa: S608
+                f"{scene_column} IN (SELECT scene_id FROM scene_faces WHERE person_name = ?)"  # noqa: S608
             )
-            params.append(name.strip().lower())
+            params.append(name.strip())
         # Membership is per video, so two albums mean a video that is in both of them.
         for album in self.albums:
             clauses.append(
-                f"{asset_column} IN (SELECT asset_id FROM asset_albums WHERE lower(album_name) = ?)"  # noqa: S608
+                f"{asset_column} IN (SELECT asset_id FROM asset_albums WHERE album_name = ?)"  # noqa: S608
             )
-            params.append(album.strip().lower())
+            params.append(album.strip())
         # Immich stores the capture time, so compare the date part and leave the clock out of it.
         for bound, comparison in ((self.since, ">="), (self.until, "<=")):
             if bound:
@@ -385,6 +387,29 @@ def visual_reference(store: Store, ml: MLClient) -> float | None:
     with suppress(sqlite3.OperationalError):
         store.set_state(REFERENCE_STATE_KEY, json.dumps({"stamp": stamp, "cosine": cosine}))
     return cosine
+
+
+def nothing_close(
+    store: Store,
+    ml: MLClient,
+    hits: Sequence[Hit],
+    filters: Filters,
+    visual_weight: float,
+) -> bool:
+    """Whether these hits are only the library's nearest scenes rather than an answer.
+
+    The claim is about the picture, so a scene the words found is an answer whatever its
+    frames scored, and the strongest scene is the one to compare rather than whichever one
+    the blend happened to put first. Filters suppress it: the floor is measured over the
+    whole library, and against the handful of scenes one person is in, every query scores
+    lower than that, answered or not.
+    """
+    if not hits or visual_weight <= 0 or filters:
+        return False
+    if any(hit.spoken_at_seconds is not None for hit in hits):
+        return False
+    floor = visual_reference(store, ml)
+    return floor is not None and max(hit.visual_score for hit in hits) <= floor
 
 
 def _text_scores(store: Store, query: str, filters: Filters) -> dict[int, TextMatch]:

@@ -127,6 +127,20 @@ def test_the_retreat_happens_once_not_once_per_video(
     assert [model.device for model in made] == ["cuda", "cpu"]
 
 
+def test_the_retreat_keeps_a_compute_type_you_chose(
+    config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the sentinel means "whatever suits the device". A named type was asked for."""
+    monkeypatch.setattr("immich_moments.transcribe._cuda_available", lambda: True)
+    config.whisper_compute_type = "float32"
+    transcriber = Transcriber(config)
+    stubbed(transcriber, lambda device: StubModel(device, fails_on_compute=device == "cuda"))
+
+    transcriber.transcribe(tmp_path / "audio.flac")
+
+    assert (transcriber.device, transcriber.compute_type) == ("cpu", "float32")
+
+
 def test_a_gpu_that_fails_at_load_falls_back(
     config: Config, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

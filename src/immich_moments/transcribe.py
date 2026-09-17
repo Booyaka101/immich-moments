@@ -82,10 +82,13 @@ class Transcriber:
         device = self.config.whisper_device
         if device == "auto":
             device = "cuda" if _cuda_available() else "cpu"
+        return device, self._compute_for(device)
+
+    def _compute_for(self, device: str) -> str:
         compute = self.config.whisper_compute_type
         if compute == "default":
-            compute = "float16" if device == "cuda" else "int8"
-        return device, compute
+            return "float16" if device == "cuda" else "int8"
+        return compute
 
     def _load(self):
         if self.device == "cuda":
@@ -118,7 +121,7 @@ class Transcriber:
             exc,
             CUDA_HINT,
         )
-        self.device, self.compute_type = "cpu", "int8"
+        self.device, self.compute_type = "cpu", self._compute_for("cpu")
         self._model = None
         return True
 
