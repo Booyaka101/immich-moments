@@ -73,7 +73,7 @@ Immich's own compose file:
 ```yaml
 services:
   immich-moments:
-    image: ghcr.io/booyaka101/immich-moments:1.2.1
+    image: ghcr.io/booyaka101/immich-moments:1.2.2
     environment:
       IMMICH_URL: http://immich-server:2283
       IMMICH_PUBLIC_URL: http://localhost:2283   # where your browser reaches Immich

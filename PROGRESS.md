@@ -1,6 +1,6 @@
 # PROGRESS
 
-Status: v1.2.1 published. PyPI, GHCR and the GitHub repository are live.
+Status: v1.2.2 published. PyPI, GHCR and the GitHub repository are live.
 
 ## What exists
 
@@ -266,7 +266,7 @@ longer implies the default is the only option.
 ## Distribution
 
 Published on the owner's instruction: `github.com/Booyaka101/immich-moments`,
-`pypi.org/project/immich-moments`, and `ghcr.io/booyaka101/immich-moments` on the v1.2.1 tag.
+`pypi.org/project/immich-moments`, and `ghcr.io/booyaka101/immich-moments` on the v1.2.2 tag.
 
 1.0.0 and 1.0.1 were uploaded to PyPI with the account token, because trusted publishing needs
 a pending publisher registered on pypi.org and that is a logged-in browser step. Registering it
@@ -280,7 +280,7 @@ want it, which beats a cold post to r/selfhosted. r/selfhosted after that.
 
 ## Repository state
 
-- Version 1.2.1 everywhere: `pyproject.toml`, `CHANGELOG.md`, the compose example, the README's
+- Version 1.2.2 everywhere: `pyproject.toml`, `CHANGELOG.md`, the compose example, the README's
   compose snippet and the status line at the top of this file.
 - `ruff check` and `ruff format --check` clean.
 - CI workflow covers 3.12 and 3.13 on Ubuntu and Windows, lint, packaging, and a Docker build.
