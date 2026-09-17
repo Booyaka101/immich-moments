@@ -21,8 +21,8 @@ All notable changes to this project are documented here. The format follows
   `whisper_beam_size`, `host`, `request_timeout`, `download_timeout`, `max_retries` and
   `min_request_interval`. `host` is the one the README told you to use without naming.
 - The README said Whisper on the CPU runs at "roughly a fifth of real time", which reads as
-  either five times faster or five times slower than the video. Measured on `small`: 26
-  minutes of audio in 74 seconds, model load included.
+  either five times faster or five times slower than the video and was neither. It now gives
+  the measured figure.
 - A release cuts its own GitHub release notes from the CHANGELOG. 1.1.1 reached PyPI and
   GHCR while the Releases page still said 1.1.0.
 
