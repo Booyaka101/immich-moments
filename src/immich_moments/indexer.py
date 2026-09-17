@@ -54,6 +54,7 @@ class IndexReport:
     timings: list[PhaseTiming] = field(default_factory=list)
     no_audio_track: int = 0
     no_speech: int = 0
+    speech_needs_visual: bool = False
 
     def timing(self, name: str) -> PhaseTiming:
         for entry in self.timings:
@@ -173,10 +174,12 @@ class Indexer:
     def audio_pass(self, report: IndexReport, limit: int | None = None) -> None:
         from .transcribe import Transcriber
 
-        pending = [
-            asset for asset in self.store.assets_needing("audio") if asset["visual_indexed_at"] is not None
-        ][: limit or None]
+        needing = self.store.assets_needing("audio")
+        pending = [asset for asset in needing if asset["visual_indexed_at"] is not None][: limit or None]
         if not pending:
+            # The visual pass writes the 16 kHz sidecar while it already has the video open, so
+            # `--phase audio` on a library that has never had one has nothing to read.
+            report.speech_needs_visual = bool(needing)
             return
         transcriber = Transcriber(self.config)
         timing = report.timing("speech")

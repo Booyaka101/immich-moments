@@ -570,6 +570,12 @@ def _print_report(report) -> None:
         table.add_row("no audio track", str(report.no_audio_track))
     if report.no_speech:
         table.add_row("no speech found", str(report.no_speech))
+    if report.speech_needs_visual:
+        table.add_row(
+            "[yellow]speech skipped[/]",
+            "the visual pass writes the audio that speech reads, and it has not run for these "
+            "videos yet. Run `index --phase visual` first, or `index` for both.",
+        )
     if report.pruned:
         table.add_row("dropped, gone from Immich", ", ".join(report.pruned))
     if report.unavailable:

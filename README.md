@@ -51,7 +51,7 @@ description, so the moments are findable from Immich's own search bar too.
 - Immich's machine-learning container reachable on its own port, usually 3003
 - ffmpeg and ffprobe on PATH
 - Python 3.12 or newer
-- A GPU is optional. On `small`, Whisper transcribed 26 minutes of audio in 74 seconds on a
+- A GPU is optional. On `small`, Whisper transcribed 28 minutes of audio in 40 seconds on a
   desktop CPU, model load included. A GPU makes that faster, not possible.
 
 ## Install
@@ -82,7 +82,8 @@ services:
     volumes:
       - immich-moments-data:/data
     ports:
-      - 8099:8099
+      # The UI has no auth, so it is published to this machine only. Widen it deliberately.
+      - 127.0.0.1:8099:8099
 ```
 
 ```
@@ -626,10 +627,17 @@ command line flag wins over both.
 | `face_max_distance` | `IMMICH_MOMENTS_FACE_MAX_DISTANCE` | `0.5` | How close a face must be to count as that person |
 | `whisper_model` | `IMMICH_MOMENTS_WHISPER_MODEL` | `small` | Any faster-whisper model name |
 | `whisper_device` | `IMMICH_MOMENTS_WHISPER_DEVICE` | `auto` | `cuda`, `cpu` or `auto` |
+| `whisper_compute_type` | `IMMICH_MOMENTS_WHISPER_COMPUTE_TYPE` | `default` | `int8` on a CPU and `float16` on a GPU. Any ctranslate2 type overrides that |
+| `whisper_beam_size` | `IMMICH_MOMENTS_WHISPER_BEAM_SIZE` | `5` | Beam search width. Lower is faster and less accurate |
 | `whisper_language` | `IMMICH_MOMENTS_WHISPER_LANGUAGE` | detect | ISO code, e.g. `en` |
 | `visual_weight` | `IMMICH_MOMENTS_VISUAL_WEIGHT` | `0.65` | Vision against speech in the blend |
 | `label_min_zscore` | `IMMICH_MOMENTS_LABEL_MIN_ZSCORE` | `2.3` | How far above the rest of the vocabulary a label must sit, in standard deviations, to be used |
+| `host` | `IMMICH_MOMENTS_HOST` | `127.0.0.1` | What the web UI binds to. There is no auth on it, so widen this deliberately |
 | `port` | `IMMICH_MOMENTS_PORT` | `8099` | Web UI port |
+| `request_timeout` | `IMMICH_MOMENTS_REQUEST_TIMEOUT` | `60.0` | Seconds before one Immich or ML request gives up |
+| `download_timeout` | `IMMICH_MOMENTS_DOWNLOAD_TIMEOUT` | `900.0` | Seconds before downloading one original gives up |
+| `max_retries` | `IMMICH_MOMENTS_MAX_RETRIES` | `5` | Attempts at a failed or rate-limited request before the asset is recorded as failed |
+| `min_request_interval` | `IMMICH_MOMENTS_MIN_REQUEST_INTERVAL` | `0.0` | Seconds to leave between Immich requests, for a server you do not want to hammer |
 
 ```toml
 [immich_moments]
@@ -711,8 +719,8 @@ full disk.
   kernel can reclaim rather than heap, but a container with a hard memory limit still sees it.
   Narrowing by person, album or date roughly halves the time.
   `tools/scale_bench.py` reproduces all of this.
-- The index is local and single user. There is no auth on the web UI, so bind it to localhost
-  or put it behind whatever you already use.
+- The index is local and single user. There is no auth on the web UI. It binds to `127.0.0.1`
+  unless you set `host`, so widen that only behind whatever you already use.
 
 ## Development
 
