@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Inline playback starts three seconds before the matching scene or spoken line. Seek requests
+  use Immich's existing playback endpoint through a streaming proxy; credentials stay server-side.
+  The UI remains single-user and unauthenticated, so keep it local or behind authentication.
+- Search JSON includes `moment_seconds`, the precise scene or speech timestamp shown to the user.
+- `python -m immich_moments.benchmark` measures video and timestamp retrieval and absent-query
+  warnings against private JSONL labels, using only a loopback Moments server. The accuracy guide
+  explains how to compare denser sampling without rebuilding the normal index.
+
 ## 1.2.2 - 2026-09-17
 
 ### Added

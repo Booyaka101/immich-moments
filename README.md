@@ -529,6 +529,16 @@ the range the videos were filmed in. "more like this" on a card ranks the whole 
 that scene's picture. The query, the filters and the scene being ranked against all live in the URL,
 so a search is a link you can keep.
 
+"Play moment" opens an inline player three seconds before the matching timestamp, including
+the spoken timestamp when speech found the result. Only one video plays at a time. Video bytes
+and seek requests pass through Moments to Immich's playback endpoint; the API key stays on the
+server. Moments does not download a complete copy or re-encode it. If the browser cannot play
+the format, the link to Immich is still available.
+
+The UI still has no authentication. Anyone who can reach it can now play indexed videos as well
+as see search results and thumbnails. Keep the loopback binding, or protect it with your own
+authenticated reverse proxy before exposing it to other machines.
+
 Every result says which side of the blend found it, picture or speech, with the raw cosine or
 BM25 value behind the tooltip, so a surprising hit is explainable rather than magic. The page
 follows whatever light or dark your system is set to, and the toggle in the corner overrides
@@ -712,7 +722,7 @@ full disk.
 - Write-back only touches tags under `moments/` and the fenced block. It will not remove tags
   for things you later drop from the index.
 - Immich has no deep link to a timestamp inside a video, so a result links to the asset and
-  tells you where to scrub to.
+  tells you where to scrub to. Use Moments' inline player to start near the matching timestamp.
 - Search maps the whole vector file for the length of a query, about 2 KB per scene. A 7,000
   video library answers in roughly 200 ms and peaks around 270 MB; 18,000 videos takes about
   490 ms and peaks near 610 MB. Most of that peak is the mapping, so it is page cache the
@@ -723,6 +733,10 @@ full disk.
   unless you set `host`, so widen that only behind whatever you already use.
 
 ## Development
+
+For a private, repeatable check of whether known events appear at the right timestamps, see
+[Measuring search accuracy locally](docs/accuracy.md). The benchmark also checks absent-query
+warnings and records its settings. It does not replace testing on real home recordings.
 
 ```
 git clone https://github.com/Booyaka101/immich-moments

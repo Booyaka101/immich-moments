@@ -190,6 +190,7 @@ class Hit:
             "scene_index": self.scene_index,
             "start_seconds": round(self.start_seconds, 2),
             "end_seconds": round(self.end_seconds, 2),
+            "moment_seconds": round(self.moment_seconds, 2),
             "timestamp": self.timestamp,
             "duration": format_timestamp(self.end_seconds - self.start_seconds),
             "label": self.label,
