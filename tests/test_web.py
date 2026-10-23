@@ -134,6 +134,7 @@ def test_search_returns_a_serialised_hit(client: TestClient) -> None:
     assert top["asset_id"] == "birthday"
     assert top["scene_index"] == 1
     assert top["timestamp"] == "07:42"
+    assert top["moment_seconds"] == 462.0
     assert top["duration"] == "00:18"
     assert top["label"] == "blowing out candles"
     assert top["people"] == ["Anna", "Tom"]
@@ -158,6 +159,7 @@ def test_the_weight_slider_reaches_the_ranking(client: TestClient) -> None:
     assert text_only["weight"] == 0.0
     assert text_only["hits"][0]["visual_score"] == 0.0
     assert text_only["hits"][0]["text_score"] != 0.0
+    assert text_only["hits"][0]["moment_seconds"] == 463.0
 
 
 def test_search_can_be_pinned_to_one_asset(client: TestClient) -> None:

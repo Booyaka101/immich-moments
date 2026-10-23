@@ -22,6 +22,7 @@ from ..search import Filters, date_range, nothing_close, resolve_albums, resolve
 from ..search import search as run_search
 from ..search import similar as run_similar
 from ..store import Store
+from .playback import play_video
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ def create_app(
     *,
     immich_transport: httpx.BaseTransport | None = None,
     ml_transport: httpx.BaseTransport | None = None,
+    playback_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
     """The transports are the same test seam the clients have; `serve` passes neither."""
     config.require_credentials()
@@ -50,12 +52,20 @@ def create_app(
         app.state.store.assert_model(clip_model)
         # One search at a time: it is the only thing that touches the store off the event loop.
         app.state.searching = asyncio.Lock()
-        try:
-            yield
-        finally:
-            app.state.ml.close()
-            immich.close()
-            app.state.store.close()
+        async with httpx.AsyncClient(
+            base_url=config.api_base,
+            headers={"x-api-key": config.immich_api_key},
+            timeout=config.request_timeout,
+            follow_redirects=False,
+            transport=playback_transport,
+        ) as playback:
+            app.state.playback = playback
+            try:
+                yield
+            finally:
+                app.state.ml.close()
+                immich.close()
+                app.state.store.close()
 
     app = FastAPI(title="immich-moments", version=_version(), lifespan=lifespan)
     templates = Jinja2Templates(directory=str(HERE / "templates"))
@@ -165,6 +175,8 @@ def create_app(
         if path.parent != config.thumbs_dir.resolve() or not path.is_file():
             raise HTTPException(status_code=404, detail="no such thumbnail")
         return FileResponse(path, media_type="image/jpeg")
+
+    app.add_api_route("/api/videos/{asset_id}", play_video, methods=["GET"])
 
     return app
 

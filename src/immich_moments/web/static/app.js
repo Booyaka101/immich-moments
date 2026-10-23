@@ -19,6 +19,7 @@ let reference = null;
 let inflight = null;
 let typing = null;
 let slow = null;
+let playing = null;
 
 // The server renders its configured blend into the slider, so this is the value a URL can leave
 // out. Anything else has to travel in the link, or a shared result set is not the one you saw.
@@ -228,6 +229,7 @@ function title(what) {
 
 /** Swap the results in one cross-fade where the browser can do it, plainly where it cannot. */
 function paint(update) {
+  stopPlayback();
   if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) {
     update();
     return;
@@ -258,6 +260,7 @@ async function run(push = true) {
   } catch (error) {
     if (error.name === "AbortError") return;
     clearTimeout(slow);
+    stopPlayback();
     results.replaceChildren();
     hint.textContent = `Search failed: ${error.message}`;
     hint.className = "note error";
@@ -301,6 +304,7 @@ function render(data) {
 }
 
 function showEmpty() {
+  stopPlayback();
   hint.textContent = "Type what you remember, or pick who is in it. Scene vectors and the transcript are searched together.";
   hint.className = "note";
   const panel = state("Search your own footage", "Describe what you saw, quote what was said, or pick a face.");
@@ -351,6 +355,7 @@ function state(heading, detail) {
 }
 
 function showSkeletons() {
+  stopPlayback();
   const cards = Array.from({ length: 8 }, () => {
     const node = document.createElement("div");
     node.className = "skeleton";
@@ -412,22 +417,68 @@ function card(hit) {
 
   const links = document.createElement("div");
   links.className = "links";
+  const play = document.createElement("button");
+  play.type = "button";
+  play.className = "more";
+  play.textContent = "Play moment";
+  play.addEventListener("click", () => playMoment(hit, frame, play));
   const link = document.createElement("a");
   link.href = hit.immich_url;
   link.target = "_blank";
   link.rel = "noopener";
-  link.textContent = `Open in Immich at ${hit.timestamp}`;
+  link.textContent = `Open in Immich · ${hit.timestamp}`;
   const more = document.createElement("button");
   more.type = "button";
   more.className = "more";
   more.textContent = "more like this";
   more.title = "Scenes that look like this one";
   more.addEventListener("click", () => showLike(hit));
-  links.append(link, more);
+  links.append(play, link, more);
   body.append(links);
 
   node.append(body);
   return node;
+}
+
+function stopPlayback() {
+  if (!playing) return;
+  const { video, frame, button } = playing;
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  video.remove();
+  frame.classList.remove("playing");
+  button.textContent = "Play moment";
+  playing = null;
+}
+
+function playMoment(hit, frame, button) {
+  stopPlayback();
+  frame.querySelector(".playback-error")?.remove();
+  const video = document.createElement("video");
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  video.setAttribute("aria-label", `${hit.file_name} at ${hit.timestamp}`);
+  const start = Math.max(0, hit.moment_seconds - 3);
+  video.addEventListener("loadedmetadata", () => {
+    if (playing?.video !== video) return;
+    video.currentTime = Number.isFinite(video.duration) ? Math.min(start, Math.max(0, video.duration - 0.1)) : start;
+    // Browsers may decline autoplay after loading. Native controls remain usable.
+    video.play().catch(() => {});
+  }, { once: true });
+  video.addEventListener("error", () => {
+    if (playing?.video !== video) return;
+    stopPlayback();
+    const message = text("p", "playback-error", "Can't play this video here. Try opening it in Immich.");
+    message.setAttribute("role", "status");
+    frame.append(message);
+  }, { once: true });
+  video.src = `/api/videos/${encodeURIComponent(hit.asset_id)}`;
+  frame.append(video);
+  frame.classList.add("playing");
+  button.textContent = "Restart moment";
+  playing = { video, frame, button };
 }
 
 /** Which channel found this scene, and the score. Browsing ranks nothing, so it shows the date. */
