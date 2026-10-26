@@ -1,6 +1,6 @@
 # PROGRESS
 
-Status: v1.2.2 published. PyPI, GHCR and the GitHub repository are live.
+Status: v1.3.1 release prepared. PRs #20 and #21 merged after CI passed. Publication pending.
 
 ## What exists
 
@@ -311,5 +311,7 @@ Remaining limits and follow-up candidates:
 - Write-back planning can race intervening description edits; avoid simultaneous manual edits.
 - The web UI still has no authentication. Keep it local or behind authentication.
 
-The bounded review/implementation/verification pass is complete. Next action is PR/CI review,
-not another broad repair loop. No merge, release or publication setting changes are authorized.
+The bounded review/implementation/verification pass is complete. The owner subsequently
+authorized merging, tagging and publishing. PRs #20 and #21 are merged; their combined code
+passed all eight CI checks. Version 1.3.1 is prepared for a release PR, followed by CI on the
+exact main commit before tagging. Existing publication gates remain unchanged.
