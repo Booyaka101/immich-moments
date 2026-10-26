@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `index --fail-on-error` finishes processing and exits 1 when videos fail or are unavailable,
+  for scheduled jobs that need a strict result. Default best-effort behaviour is unchanged.
+
+### Fixed
+
+- API and ML clients reject redirects rather than forwarding API keys or private inputs.
+- Failed ML health checks now raise an actionable error instead of being silently ignored.
+- Discovery checkpoints at the start of its walk so updates during enumeration remain eligible.
+- Vector appends, orphan recovery and reset deletion hold the database write lock.
+- Replacing scenes or resetting the index clears cached visual search calibration.
+- Rediscovered unavailable assets become eligible for retry without erasing other failure diagnostics.
+- Exact face matches with zero distance are no longer replaced by weaker matches.
+- Numeric configuration and CLI overrides reject nonfinite and out-of-range values before processing.
+
 ## 1.3.0 - 2026-10-24
 
 ### Added

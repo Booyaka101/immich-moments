@@ -483,6 +483,22 @@ def test_a_complete_discovery_moves_the_checkpoint(config: Config, store: Store)
     assert store.get_state("last_discovery") is not None
 
 
+def test_discovery_checkpoint_precedes_the_walk(config: Config, store: Store) -> None:
+    """An upload during the walk must still be eligible for the next incremental run."""
+    clock = {"now": "2026-10-26T10:00:00+00:00"}
+
+    def handler(_request):
+        clock["now"] = "2026-10-26T10:05:00+00:00"
+        return httpx.Response(200, json={"assets": {"items": [{"id": "a1"}], "nextPage": None}})
+
+    with (
+        ImmichClient(config, transport=httpx.MockTransport(handler)) as immich,
+        patch("immich_moments.indexer._now", side_effect=lambda: clock["now"]),
+    ):
+        Indexer(config, store, immich, ml=None).discover(None)
+    assert store.get_state("last_discovery") == "2026-10-26T10:00:00+00:00"
+
+
 def test_naming_someone_after_indexing_reaches_the_scenes_already_indexed(
     config: Config, store: Store, colour_video: Path, labels_file: Path
 ) -> None:

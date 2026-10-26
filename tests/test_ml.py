@@ -58,6 +58,41 @@ def test_ping(config: Config) -> None:
         assert ml.ping() is True
 
 
+@pytest.mark.parametrize("image", [False, True])
+def test_prediction_redirects_do_not_forward_private_input(config: Config, image: bool) -> None:
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(307, headers={"location": "https://elsewhere.test/collect"})
+        return httpx.Response(200, json={"clip": [1.0, 0.0]})
+
+    with (
+        MLClient(config, "clip", "faces", transport=httpx.MockTransport(handler)) as ml,
+        pytest.raises(MLError, match="307"),
+    ):
+        if image:
+            ml.embed_image(FRAME)
+        else:
+            ml.embed_text("private query")
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("status,body", [(503, "unavailable"), (200, "not pong")])
+def test_a_failed_ping_is_an_error_not_a_false_success(config: Config, status: int, body: str) -> None:
+    with (
+        MLClient(
+            config,
+            "clip",
+            "faces",
+            transport=httpx.MockTransport(lambda _: httpx.Response(status, text=body)),
+        ) as ml,
+        pytest.raises(MLError, match="ping"),
+    ):
+        ml.ping()
+
+
 def test_image_embedding_is_decoded_twice_and_normalised(config: Config) -> None:
     """The container serialises the vector with orjson before FastAPI serialises the response."""
     assert isinstance(RECORDED["clip_visual"]["clip"], str), "fixture must keep the double encoding"

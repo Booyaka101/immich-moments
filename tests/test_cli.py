@@ -20,6 +20,7 @@ from immich_moments import cli as cli_module
 from immich_moments.cli import _ffmpeg_rows, app, main
 from immich_moments.config import Config
 from immich_moments.errors import ConfigError, ImmichError, MediaError, StorageError
+from immich_moments.indexer import IndexReport
 from immich_moments.labels import LabelIndex
 from immich_moments.search import Hit
 from immich_moments.store import FaceRecord, SceneRecord, Store
@@ -178,6 +179,53 @@ def stub_clients(monkeypatch: pytest.MonkeyPatch) -> None:
         "immich_moments.cli._clients",
         lambda _config: (StubClient(), StubClient(), "ViT-B-32__openai", "buffalo_l"),
     )
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["index", "--limit", "0", "--reindex"],
+        ["search", "cake", "--limit", "-1"],
+        ["search", "cake", "--weight", "2"],
+    ],
+)
+def test_invalid_cli_ranges_are_rejected_before_connecting(args, monkeypatch) -> None:
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("invalid flags must not reach the server or reset the index")
+
+    monkeypatch.setattr(cli_module, "_clients", unexpected)
+    result = runner.invoke(app, args)
+    assert result.exit_code == 2
+    assert "Invalid value" in result.output
+
+
+@pytest.mark.parametrize("command,flag", [("search", "--weight"), ("relabel", "--min-zscore")])
+def test_nonfinite_cli_overrides_are_rejected_before_connecting(command, flag, monkeypatch, capsys) -> None:
+    code, _ = run(command, flag, "nan", monkeypatch=monkeypatch)
+    assert code == ConfigError.exit_code
+    assert "must be finite" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "strict,problem,expected",
+    [(False, "failed", 0), (True, "failed", 1), (True, "unavailable", 1), (True, None, 0)],
+)
+def test_fail_on_error_reports_everything_before_exiting(strict, problem, expected, monkeypatch) -> None:
+    stub_clients(monkeypatch)
+    monkeypatch.setattr(StubClient, "embed_text", lambda _self, _text: unit(1), raising=False)
+    report = IndexReport(discovered=2, visual_indexed=1)
+    if problem == "failed":
+        report.failed = [("broken.mp4", "corrupt file")]
+    elif problem == "unavailable":
+        report.unavailable = ["broken.mp4"]
+    monkeypatch.setattr(cli_module, "run_index", lambda *_args, **_kwargs: report)
+    args = ["index", "--fail-on-error"] if strict else ["index"]
+    result = runner.invoke(app, args)
+    assert result.exit_code == expected, result.output
+    assert "discovered" in result.output
+    assert "timings" in result.output
+    if problem:
+        assert "broken.mp4" in result.output
 
 
 def test_searching_for_nothing_at_all_says_what_to_type(monkeypatch: pytest.MonkeyPatch, capsys) -> None:

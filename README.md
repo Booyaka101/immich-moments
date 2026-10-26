@@ -172,8 +172,17 @@ Immich's ML container on the same box. Most of the visual time is downloading or
 decoding them, not the model.
 
 It checkpoints after every asset, so an interrupted run continues where it stopped.
-`--since auto` (the default) only looks at assets added since the last run. `--reindex` throws
+`--since auto` (the default) looks at assets updated since the previous discovery began. `--reindex` throws
 the index away and rebuilds it, which is also what a change of CLIP model needs.
+
+Indexing is best-effort by default: individual video failures are reported without failing the
+whole command. For cron jobs, use `immich-moments index --fail-on-error` to finish processing
+and then exit 1 if any video failed or was unavailable. A rediscovered unavailable asset becomes
+eligible for retry; use `--since all` when its restoration did not change its Immich timestamp.
+
+Run only one indexer per data directory. Stop the web server before `--reindex`, then restart it
+afterwards. Write locking protects vector appends and recovery, but concurrent indexers and
+rebuilding while serving are not supported.
 
 The model is whichever one your Immich is configured with, under Administration, Settings,
 Machine Learning. A bigger one than Immich's `ViT-B-32__openai` default is worth considering if
@@ -658,13 +667,20 @@ visual_weight = 0.5
 
 ### Exit codes
 
+Numeric settings must be finite and within their documented ranges. Timeouts, retry counts and
+Whisper beam sizes must be positive; ports must be between 1 and 65535. CLI result and asset
+limits must be at least 1.
+
+API and ML requests do not follow redirects, to avoid forwarding your API key, query text or
+scene images. Configure `IMMICH_URL` and `IMMICH_ML_URL` with their final server addresses.
+
 Every command exits deliberately, so a cron job or a shell script can tell a broken key from a
 full disk.
 
 | Code | Meaning |
 |---|---|
-| 0 | Worked. Assets whose original had been deleted are skipped, not failed |
-| 1 | Anything else that went wrong |
+| 0 | Worked. By default, individual indexing failures or unavailable originals are reported without failing the command |
+| 1 | Anything else that went wrong, or `index --fail-on-error` encountered a failed or unavailable video |
 | 2 | Configuration: a missing URL or key, or a setting that will not parse |
 | 3 | Immich refused or could not answer |
 | 4 | The ML container refused or could not answer |

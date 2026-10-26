@@ -14,6 +14,7 @@ from immich_moments.config import Config
 from immich_moments.faces import (
     MIN_THUMBNAIL_SIDE,
     PeopleIndex,
+    _best_per_person,
     faces_in_frame,
     load_people_index,
     pad_thumbnail,
@@ -23,7 +24,7 @@ from immich_moments.faces import (
 )
 from immich_moments.immich import ImmichClient
 from immich_moments.ml import MLClient
-from immich_moments.store import Store
+from immich_moments.store import FaceRecord, Store
 
 from conftest import unit
 
@@ -80,6 +81,12 @@ def test_the_nearest_named_person_wins() -> None:
 def test_a_stranger_is_left_unnamed() -> None:
     people = index_of(("p1", "Anna", ANNA))
     assert people.match(STRANGER, max_distance=0.1) is None
+
+
+def test_a_zero_distance_match_is_not_replaced_by_a_weaker_face() -> None:
+    exact = FaceRecord("p1", "Anna", 0.0, 0.99, (0, 0, 10, 10))
+    weaker = FaceRecord("p1", "Anna", 0.2, 0.99, (20, 20, 30, 30))
+    assert _best_per_person([exact, weaker]) == [exact]
 
 
 def test_an_empty_people_index_matches_nothing() -> None:

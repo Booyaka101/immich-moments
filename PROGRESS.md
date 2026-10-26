@@ -286,3 +286,30 @@ want it, which beats a cold post to r/selfhosted. r/selfhosted after that.
 - CI workflow covers 3.12 and 3.13 on Ubuntu and Windows, lint, packaging, and a Docker build.
 - Release workflow is tag-triggered, re-verifies, and refuses a tag that disagrees with
   `pyproject.toml`.
+
+## Review and hardening pass, 2026-10-26
+
+Reviewed all substantive Python modules, web JavaScript and HTML, Docker/compose settings,
+CI workflows and relevant documentation. Search cancellation is isolated in PR #20; this
+hardening branch starts from main and does not include that PR.
+
+Confirmed and fixed redirect forwarding, ignored ML ping failures, end-of-walk discovery
+checkpoints, unlocked vector appends/recovery/reset, stale visual calibration after replacement,
+unavailable-asset retry eligibility, zero-distance face selection and numeric input validation.
+Added opt-in `index --fail-on-error` for scheduled runs, retaining best-effort defaults.
+
+Verification: 424 fast Python tests passed, 2 slow/live tests deselected. Regression tests use
+replayed HTTP transports, SQLite write-lock assertions and real local media processing. Ruff
+lint and formatting passed. No live Immich or interactive-browser verification was performed.
+
+Remaining limits and follow-up candidates:
+
+- Concurrent indexers and rebuilding while serving remain unsupported. The vector file and
+  SQLite database are not a single crash-atomic storage system.
+- Malformed ML vector/face payloads can still surface as generic errors.
+- Startup failures can leave clients unclosed until process exit.
+- Write-back planning can race intervening description edits; avoid simultaneous manual edits.
+- The web UI still has no authentication. Keep it local or behind authentication.
+
+The bounded review/implementation/verification pass is complete. Next action is PR/CI review,
+not another broad repair loop. No merge, release or publication setting changes are authorized.
