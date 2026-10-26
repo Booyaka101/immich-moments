@@ -21,6 +21,9 @@ All notable changes to this project are documented here. The format follows
 - Rediscovered unavailable assets become eligible for retry without erasing other failure diagnostics.
 - Exact face matches with zero distance are no longer replaced by weaker matches.
 - Numeric configuration and CLI overrides reject nonfinite and out-of-range values before processing.
+- Clearing a search or navigating back to an empty search now cancels the pending request
+  and loading timer. Late responses, errors and queued view transitions can no longer
+  overwrite the empty screen or a newer search.
 
 ## 1.3.0 - 2026-10-24
 
