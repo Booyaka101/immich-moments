@@ -232,14 +232,14 @@ class Store:
             self.db.execute("ALTER TABLE scene_faces ADD COLUMN embedding BLOB")
 
     def _reclaim_orphan_vectors(self) -> None:
-        """Vectors are appended before the transaction that points at them, so a run killed in
-        between leaves rows nothing references. The file is append-only, so the tail is reusable."""
-        stored_dim = self.get_state("vector_dim")
-        if stored_dim is None:
-            return
-        top = self.db.execute("SELECT MAX(vector_row) AS top FROM scenes").fetchone()["top"]
-        rows = 0 if top is None else int(top) + 1
-        VectorFile(self.config.vectors_path, int(stored_dim)).truncate(rows)
+        """Recover an uncommitted tail without truncating another process's active append."""
+        with self.transaction():
+            stored_dim = self.get_state("vector_dim")
+            if stored_dim is None:
+                return
+            top = self.db.execute("SELECT MAX(vector_row) AS top FROM scenes").fetchone()["top"]
+            rows = 0 if top is None else int(top) + 1
+            VectorFile(self.config.vectors_path, int(stored_dim)).truncate(rows)
 
     def close(self) -> None:
         self.db.close()
@@ -252,7 +252,8 @@ class Store:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        self.db.execute("BEGIN")
+        # All these transactions write. Acquire the lock before touching the vector file too.
+        self.db.execute("BEGIN IMMEDIATE")
         try:
             yield self.db
         except BaseException:
@@ -319,8 +320,9 @@ class Store:
                 "UPDATE assets SET visual_indexed_at = NULL, audio_indexed_at = NULL, "
                 "status = 'pending', error = NULL"
             )
-        self.db.execute("INSERT INTO transcript_fts(transcript_fts) VALUES ('rebuild')")
-        self.config.vectors_path.unlink(missing_ok=True)
+            db.execute("DELETE FROM run_state WHERE key = 'visual_reference'")
+            db.execute("INSERT INTO transcript_fts(transcript_fts) VALUES ('rebuild')")
+            self.config.vectors_path.unlink(missing_ok=True)
 
     # ---- assets ----------------------------------------------------------
 
@@ -341,7 +343,11 @@ class Store:
                 original_file_name = excluded.original_file_name,
                 file_created_at    = excluded.file_created_at,
                 updated_at         = excluded.updated_at,
-                duration_seconds   = COALESCE(excluded.duration_seconds, assets.duration_seconds)
+                duration_seconds   = COALESCE(excluded.duration_seconds, assets.duration_seconds),
+                status             = CASE WHEN assets.status = 'unavailable' THEN
+                    CASE WHEN assets.visual_indexed_at IS NULL THEN 'pending' ELSE 'indexed' END
+                    ELSE assets.status END,
+                error              = CASE WHEN assets.status = 'unavailable' THEN NULL ELSE assets.error END
             """,
             (asset_id, original_file_name, file_created_at, updated_at, duration_seconds),
         )
@@ -415,9 +421,10 @@ class Store:
         self, asset_id: str, scenes: Sequence[SceneRecord], vectors: VectorFile, *, indexed_at: str
     ) -> list[int]:
         """Swap in a fresh set of scenes for one asset and mark its visual phase done."""
-        rows = [vectors.append(s.vector) if s.vector is not None else None for s in scenes]
         scene_ids: list[int] = []
         with self.transaction() as db:
+            rows = [vectors.append(s.vector) if s.vector is not None else None for s in scenes]
+            db.execute("DELETE FROM run_state WHERE key = 'visual_reference'")
             db.execute("DELETE FROM scenes WHERE asset_id = ?", (asset_id,))
             for scene, row in zip(scenes, rows, strict=True):
                 cursor = db.execute(

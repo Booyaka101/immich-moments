@@ -43,6 +43,29 @@ def test_server_version_and_models(config: Config) -> None:
         assert immich.face_thresholds() == (0.7, 0.5)
 
 
+@pytest.mark.parametrize("download", [False, True])
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+def test_redirects_never_forward_the_api_key(
+    config: Config, tmp_path: Path, download: bool, status: int
+) -> None:
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(status, headers={"location": "https://elsewhere.test/collect"})
+        return httpx.Response(200, json={"major": 3, "minor": 2, "patch": 2})
+
+    with client(config, handler) as immich, pytest.raises(ImmichError, match="redirect"):
+        if download:
+            immich.download_original("a1", tmp_path / "video.mp4")
+        else:
+            immich.server_version()
+    assert len(requests) == 1
+    assert requests[0].headers["x-api-key"] == config.immich_api_key
+    assert not (tmp_path / "video.mp4").exists()
+
+
 def test_model_names_without_admin_rights(config: Config) -> None:
     with client(config, lambda _r: json_response({"machineLearning": {}})) as immich:
         with pytest.raises(ImmichError, match="admin key"):

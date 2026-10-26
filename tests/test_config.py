@@ -124,6 +124,42 @@ def test_visual_weight_must_be_a_fraction(tmp_path: Path) -> None:
         load_config(path)
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["request_timeout", "download_timeout", "max_scene_seconds", "face_max_distance", "label_min_zscore"],
+)
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_nonfinite_config_numbers_are_rejected(name: str, value: str, monkeypatch) -> None:
+    monkeypatch.setenv("IMMICH_MOMENTS_" + name.upper(), value)
+    with pytest.raises(ConfigError, match=name):
+        load_config()
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("max_retries", 0),
+        ("whisper_beam_size", 0),
+        ("port", 0),
+        ("port", 65536),
+        ("request_timeout", 0),
+        ("download_timeout", -1),
+        ("max_scene_seconds", -1),
+        ("face_min_score", 1.1),
+        ("face_max_distance", 2.1),
+    ],
+)
+def test_out_of_range_config_numbers_are_rejected(name: str, value: float) -> None:
+    with pytest.raises(ConfigError, match=name):
+        load_config(overrides={name: value})
+
+
+def test_zero_scene_subdivision_and_no_throttle_are_valid() -> None:
+    config = load_config(overrides={"max_scene_seconds": 0, "min_request_interval": 0})
+    assert config.max_scene_seconds == 0
+    assert config.min_request_interval == 0
+
+
 def test_data_dir_expands_and_drives_every_derived_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATA_DIR", "~/moments-data")
     config = load_config()

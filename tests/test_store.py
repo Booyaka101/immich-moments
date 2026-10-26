@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import numpy as np
 import pytest
 
@@ -22,6 +24,89 @@ def seed_asset(store: Store, asset_id: str = "a1") -> None:
         updated_at="2026-06-01T00:00:00Z",
         duration_seconds=30.0,
     )
+
+
+def assert_write_locked(store: Store, config: Config) -> None:
+    assert store.db.in_transaction
+    with sqlite3.connect(config.db_path, timeout=0) as other:
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            other.execute("BEGIN IMMEDIATE")
+
+
+def test_scene_appends_hold_the_write_lock(store: Store, config: Config, monkeypatch) -> None:
+    seed_asset(store)
+    store.check_model("clip", 8, reindex=False)
+    vectors = store.vectors()
+    append = vectors.append
+
+    def checked_append(vector):
+        assert_write_locked(store, config)
+        return append(vector)
+
+    monkeypatch.setattr(vectors, "append", checked_append)
+    store.replace_scenes("a1", [SceneRecord(0, 0, 5, vector=unit(1))], vectors, indexed_at=NOW)
+
+
+def test_reclaim_holds_the_write_lock(store: Store, config: Config, monkeypatch) -> None:
+    store.check_model("clip", 8, reindex=False)
+    store.vectors().append(unit(1))
+    truncate = VectorFile.truncate
+
+    def checked_truncate(vectors, rows):
+        assert_write_locked(store, config)
+        truncate(vectors, rows)
+
+    monkeypatch.setattr(VectorFile, "truncate", checked_truncate)
+    store._reclaim_orphan_vectors()
+    assert store.vectors().rows == 0
+
+
+def test_rediscovered_unavailable_asset_can_be_retried(store: Store) -> None:
+    seed_asset(store)
+    store.set_asset_status("a1", "unavailable", "original was missing")
+    seed_asset(store)
+    assert [row["id"] for row in store.assets_needing("visual")] == ["a1"]
+    assert store.asset("a1")["error"] is None
+
+
+def test_rediscovered_failed_asset_keeps_its_diagnostic(store: Store) -> None:
+    seed_asset(store)
+    store.set_asset_status("a1", "failed", "corrupt video")
+    seed_asset(store)
+    assert store.asset("a1")["status"] == "failed"
+    assert store.asset("a1")["error"] == "corrupt video"
+
+
+def test_replacing_scenes_invalidates_the_visual_reference_cache(store: Store) -> None:
+    seed_asset(store)
+    store.check_model("clip", 8, reindex=False)
+    store.set_state("visual_reference", '{"stamp": "clip:1", "cosine": 0.1}')
+    store.replace_scenes("a1", [SceneRecord(0, 0, 5, vector=unit(1))], store.vectors(), indexed_at=NOW)
+    assert store.get_state("visual_reference") is None
+
+
+def test_reset_invalidates_the_visual_reference_cache(store: Store) -> None:
+    store.set_state("visual_reference", '{"stamp": "clip:1", "cosine": 0.1}')
+    store.reset_index()
+    assert store.get_state("visual_reference") is None
+
+
+def test_reset_removes_vectors_while_holding_the_write_lock(
+    store: Store, config: Config, monkeypatch
+) -> None:
+    store.check_model("clip", 8, reindex=False)
+    store.vectors().append(unit(1))
+    path_type = type(config.vectors_path)
+    unlink = path_type.unlink
+
+    def checked_unlink(path, *args, **kwargs):
+        if path == config.vectors_path:
+            assert_write_locked(store, config)
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(path_type, "unlink", checked_unlink)
+    store.reset_index()
+    assert not config.vectors_path.exists()
 
 
 def test_vector_file_round_trips_rows(config: Config) -> None:

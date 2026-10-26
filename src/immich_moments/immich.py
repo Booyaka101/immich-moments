@@ -47,7 +47,8 @@ class ImmichClient:
             },
             timeout=httpx.Timeout(config.request_timeout, read=config.request_timeout),
             transport=transport,
-            follow_redirects=True,
+            # httpx does not strip custom API-key headers on cross-origin redirects.
+            follow_redirects=False,
         )
 
     def close(self) -> None:
@@ -106,6 +107,13 @@ class ImmichClient:
     def _checked(self, response: httpx.Response, method: str, url: str) -> httpx.Response:
         if response.is_success:
             return response
+        if response.is_redirect:
+            raise ImmichError(
+                "Immich returned a redirect. Set IMMICH_URL to the final server address; "
+                "redirects are not followed because requests carry your API key.",
+                status=response.status_code,
+                url=url,
+            )
         detail = _detail(response)
         if response.status_code in (401, 403):
             raise ImmichError(

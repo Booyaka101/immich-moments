@@ -194,6 +194,10 @@ def _best_per_person(records: list[FaceRecord]) -> list[FaceRecord]:
             unnamed.append(record)
             continue
         current = best.get(record.person_id)
-        if current is None or (record.distance or 1.0) < (current.distance or 1.0):
+        if current is None or _distance(record) < _distance(current):
             best[record.person_id] = record
-    return sorted(best.values(), key=lambda r: r.distance or 1.0) + unnamed
+    return sorted(best.values(), key=_distance) + unnamed
+
+
+def _distance(record: FaceRecord) -> float:
+    return record.distance if record.distance is not None else float("inf")

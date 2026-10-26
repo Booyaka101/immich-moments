@@ -235,7 +235,7 @@ def index(
     since: Annotated[
         str, typer.Option("--since", help="'auto' to continue from the last run, 'all', or an ISO date.")
     ] = "auto",
-    limit: Annotated[int | None, typer.Option("--limit", help="Stop after this many assets.")] = None,
+    limit: Annotated[int | None, typer.Option("--limit", min=1, help="Stop after this many assets.")] = None,
     phase: Annotated[str, typer.Option("--phase", help="all, visual or audio.")] = "all",
     reindex: Annotated[bool, typer.Option("--reindex", help="Throw the index away and rebuild it.")] = False,
     prune: Annotated[
@@ -250,6 +250,12 @@ def index(
     ] = False,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="With --write-back, print the mutations and send none.")
+    ] = False,
+    fail_on_error: Annotated[
+        bool,
+        typer.Option(
+            "--fail-on-error", help="Exit 1 after finishing if any video failed or was unavailable."
+        ),
     ] = False,
     config_path: ConfigOption = None,
     verbose: VerboseOption = False,
@@ -288,6 +294,8 @@ def index(
 
         if write_back:
             _print_writeback(apply_write_back(store, immich, store.indexed_asset_ids(), dry_run=dry_run))
+        if fail_on_error and (report.failed or report.unavailable):
+            raise typer.Exit(1)
 
 
 @app.command()
@@ -314,7 +322,7 @@ def relabel(
     Labels are read off the scene vectors that are already in the index, so trying a different
     vocabulary costs one embedding pass over the word list, not another pass over your library.
     """
-    config = _setup(config_path, verbose)
+    config = _setup(config_path, verbose, label_min_zscore=min_zscore)
     immich, ml, clip_model, _face = _clients(config)
     with immich, ml, Store(config) as store:
         store.assert_model(clip_model)
@@ -327,7 +335,7 @@ def relabel(
             ml,
             config.data_dir,
             labels_path=labels,
-            min_zscore=config.label_min_zscore if min_zscore is None else min_zscore,
+            min_zscore=config.label_min_zscore,
         )
         vectors = store.vectors().read_all()
         usable = [scene for scene in scenes if scene["vector_row"] < vectors.shape[0]]
@@ -379,10 +387,10 @@ def _print_relabel(total: int, picks: list[Pick], changes: list[tuple[int, str |
 @app.command()
 def search(
     query: Annotated[str, typer.Argument(help="What you are looking for.")] = "",
-    limit: Annotated[int, typer.Option("--limit", "-n", help="How many scenes to show.")] = 10,
+    limit: Annotated[int, typer.Option("--limit", "-n", min=1, help="How many scenes to show.")] = 10,
     weight: Annotated[
         float | None,
-        typer.Option("--weight", "-w", help="Visual weight, 0 = speech only, 1 = vision only."),
+        typer.Option("--weight", "-w", min=0, max=1, help="Visual weight, 0 = speech only, 1 = vision only."),
     ] = None,
     asset: Annotated[str | None, typer.Option("--asset", help="Restrict to one asset id.")] = None,
     person: Annotated[
@@ -414,7 +422,7 @@ def search(
     With --person, --album, --asset or a date range and no query, it lists those scenes
     newest video first. With --like it ranks by picture alone against the scene you name.
     """
-    config = _setup(config_path, verbose)
+    config = _setup(config_path, verbose, visual_weight=weight)
     wanted = [name.strip() for name in (person or []) if name.strip()]
     in_albums = [name.strip() for name in (album or []) if name.strip()]
     first, last = date_range(since, until)
@@ -438,7 +446,7 @@ def search(
             since=first,
             until=last,
         )
-        blend = config.visual_weight if weight is None else weight
+        blend = config.visual_weight
         if like is not None:
             reference, hits = run_similar(store, like, limit=limit, filters=filters)
         else:

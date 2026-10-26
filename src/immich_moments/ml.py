@@ -51,7 +51,8 @@ class MLClient:
             base_url=config.ml_url.rstrip("/"),
             timeout=httpx.Timeout(config.request_timeout),
             transport=transport,
-            follow_redirects=True,
+            # A 307/308 must not forward private query text or scene frames elsewhere.
+            follow_redirects=False,
         )
 
     def close(self) -> None:
@@ -153,7 +154,12 @@ class MLClient:
                 f"cannot reach the ML container at {self.config.ml_url}: {exc}. "
                 "Is immich-machine-learning running and its port published?"
             ) from exc
-        return response.is_success and response.text.strip() == "pong"
+        if not response.is_success or response.text.strip() != "pong":
+            raise MLError(
+                f"the ML container at {self.config.ml_url} did not answer /ping with pong "
+                f"(HTTP {response.status_code}). Check IMMICH_ML_URL."
+            )
+        return True
 
 
 def _body(response: httpx.Response) -> dict[str, Any]:

@@ -93,6 +93,7 @@ class Indexer:
         """
         if prune and (since or limit is not None):
             raise ConfigError("--prune has to walk the whole library, so it cannot take --since or --limit.")
+        started_at = _now()
         seen: list[str] = []
         truncated = False
         for asset in self.immich.iter_videos(updated_after=since):
@@ -113,7 +114,8 @@ class Indexer:
         # Checkpointing a truncated enumeration would hide every video --limit never reached from
         # the next `--since auto` run, permanently.
         if not truncated:
-            self.store.set_state("last_discovery", _now())
+            # Changes arriving during this walk must remain eligible for the next run.
+            self.store.set_state("last_discovery", started_at)
         if not prune:
             return len(seen), []
         gone = self.store.prune_assets(seen)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import math
 import os
 import tomllib
 from dataclasses import dataclass, fields
@@ -205,9 +206,34 @@ def load_config(config_path: Path | None = None, overrides: dict[str, object] | 
 
     kwargs = {name: _coerce(name, value, _unwrap(types[name])) for name, value in resolved.items()}
     config = Config(**kwargs)
-    if not 0.0 <= config.visual_weight <= 1.0:
-        raise ConfigError(f"visual_weight must be between 0 and 1, got {config.visual_weight}")
+    _validate(config)
     return config
+
+
+def _validate(config: Config) -> None:
+    for option in fields(Config):
+        value = getattr(config, option.name)
+        if _unwrap(option.type) is float and not math.isfinite(value):
+            raise ConfigError(f"{option.name} must be finite, got {value}")
+    for name in ("visual_weight", "face_min_score", "face_max_distance"):
+        upper = 2 if name == "face_max_distance" else 1
+        value = getattr(config, name)
+        if not 0 <= value <= upper:
+            raise ConfigError(f"{name} must be between 0 and {upper}, got {value}")
+    for name in ("request_timeout", "download_timeout", "max_retries", "whisper_beam_size"):
+        if getattr(config, name) <= 0:
+            raise ConfigError(f"{name} must be greater than 0")
+    for name in (
+        "scene_threshold",
+        "min_scene_seconds",
+        "max_scene_seconds",
+        "label_min_zscore",
+        "min_request_interval",
+    ):
+        if getattr(config, name) < 0:
+            raise ConfigError(f"{name} must be non-negative")
+    if not 1 <= config.port <= 65535:
+        raise ConfigError(f"port must be between 1 and 65535, got {config.port}")
 
 
 def _unwrap(annotation) -> type:
