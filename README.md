@@ -745,6 +745,12 @@ pip install -e ".[dev]"
 pytest -m "not slow and not live"
 ```
 
+The web search-state tests use Node.js 22 or newer, with no npm dependencies:
+
+```
+node --test tests/web/*.test.mjs
+```
+
 The slow tests download a Whisper model and run it against a generated fixture video:
 
 ```
