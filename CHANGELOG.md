@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- Clearing a search or navigating back to an empty search now cancels the pending request
+  and loading timer. Late responses, errors and queued view transitions can no longer
+  overwrite the empty screen or a newer search.
+
 ## 1.3.0 - 2026-10-24
 
 ### Added

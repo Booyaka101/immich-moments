@@ -237,28 +237,36 @@ function paint(update) {
   document.startViewTransition(update);
 }
 
+function cancelSearch() {
+  inflight?.abort();
+  inflight = null;
+  clearTimeout(slow);
+  button.disabled = false;
+}
+
 async function run(push = true) {
   const params = searchParams();
-  inflight?.abort();
+  cancelSearch();
   inflight = new AbortController();
   const mine = inflight;
   button.disabled = true;
   hint.textContent = "Searching…";
   hint.className = "note";
-  clearTimeout(slow);
   slow = setTimeout(() => mine === inflight && showSkeletons(), SKELETON_AFTER);
   try {
     const url = `/api/search?${params}&limit=24`;
     const response = await fetch(url, { signal: mine.signal });
     const data = await response.json();
+    if (mine !== inflight) return;
     if (!response.ok) throw new Error(data.error || data.detail || response.statusText);
     clearTimeout(slow);
-    paint(() => render(data));
+    // View transitions can defer this callback until after another search or a clear.
+    paint(() => { if (mine === inflight) render(data); });
     const here = `/?${params}`;
     if (push) history.pushState({}, "", here);
     else history.replaceState({}, "", here);
   } catch (error) {
-    if (error.name === "AbortError") return;
+    if (mine !== inflight || error.name === "AbortError") return;
     clearTimeout(slow);
     stopPlayback();
     results.replaceChildren();
@@ -304,6 +312,8 @@ function render(data) {
 }
 
 function showEmpty() {
+  cancelSearch();
+  clearTimeout(typing);
   stopPlayback();
   hint.textContent = "Type what you remember, or pick who is in it. Scene vectors and the transcript are searched together.";
   hint.className = "note";
