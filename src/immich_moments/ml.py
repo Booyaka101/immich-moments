@@ -121,27 +121,25 @@ class MLClient:
             },
             image=jpeg,
         )
-        raw = body.get("facial-recognition")
-        if isinstance(raw, str):
-            raw = json.loads(raw)
-        if raw is None:
-            raise MLError("the ML container answered without a 'facial-recognition' key")
+        raw = _decoded(body, "facial-recognition")
+        if not isinstance(raw, list):
+            raise MLError("the ML container returned an invalid facial-recognition list")
         faces: list[DetectedFace] = []
         for item in raw:
-            box = item.get("boundingBox") or {}
-            embedding = item.get("embedding")
-            if isinstance(embedding, str):
-                embedding = json.loads(embedding)
+            if not isinstance(item, dict) or not isinstance(box := item.get("boundingBox"), dict):
+                raise MLError("the ML container returned an invalid face detection")
+            try:
+                bbox = (int(box["x1"]), int(box["y1"]), int(box["x2"]), int(box["y2"]))
+                score = float(item["score"])
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise MLError("the ML container returned an invalid face detection") from exc
+            if not 0 <= score <= 1:
+                raise MLError("the ML container returned an invalid face score")
             faces.append(
                 DetectedFace(
-                    bbox=(
-                        int(box.get("x1", 0)),
-                        int(box.get("y1", 0)),
-                        int(box.get("x2", 0)),
-                        int(box.get("y2", 0)),
-                    ),
-                    score=float(item.get("score", 0.0)),
-                    embedding=_unit(np.asarray(embedding, dtype=np.float32)),
+                    bbox=bbox,
+                    score=score,
+                    embedding=_unit(_vector(item, "embedding")),
                 )
             )
         return faces
@@ -172,21 +170,34 @@ def _body(response: httpx.Response) -> dict[str, Any]:
     return body
 
 
-def _vector(body: dict[str, Any], key: str) -> np.ndarray:
+def _decoded(body: dict[str, Any], key: str) -> Any:
     raw = body.get(key)
     if raw is None:
         raise MLError(f"the ML container answered without a {key!r} key: {sorted(body)}")
     if isinstance(raw, str):
-        raw = json.loads(raw)
-    vector = np.asarray(raw, dtype=np.float32).ravel()
-    if vector.size == 0:
-        raise MLError(f"the ML container returned an empty {key} vector")
+        try:
+            return json.loads(raw)
+        except ValueError as exc:
+            raise MLError(f"the ML container returned invalid JSON for {key}") from exc
+    return raw
+
+
+def _vector(body: dict[str, Any], key: str) -> np.ndarray:
+    raw = _decoded(body, key)
+    try:
+        with np.errstate(over="ignore"):
+            vector = np.asarray(raw, dtype=np.float32)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MLError(f"the ML container returned an invalid {key} vector") from exc
+    if vector.ndim != 1 or not vector.size or not np.isfinite(vector).all():
+        raise MLError(f"the ML container returned an invalid {key} vector")
     return vector
 
 
 def _unit(vector: np.ndarray) -> np.ndarray:
-    norm = float(np.linalg.norm(vector))
-    return vector if norm == 0.0 else (vector / norm).astype(np.float32)
+    wide = vector.astype(np.float64)
+    norm = np.linalg.norm(wide)
+    return vector if norm == 0.0 else (wide / norm).astype(np.float32)
 
 
 def _failure(response: httpx.Response, entries: dict[str, Any]) -> str:

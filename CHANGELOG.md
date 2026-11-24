@@ -14,6 +14,9 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - Invalid asset pages now stop catalogue discovery rather than being mistaken for an empty page during pruning.
+- Catalogue walks follow continuation tokens on empty pages and reject invalid or repeated continuations.
+- Invalid search weights get consistent configuration errors across Typer versions.
+- Malformed ML embeddings and face detections now report ML errors instead of tracebacks or invalid scores.
 
 ## 1.3.1 - 2026-10-26
 

@@ -412,7 +412,7 @@ def search(
     limit: Annotated[int, typer.Option("--limit", "-n", min=1, help="How many scenes to show.")] = 10,
     weight: Annotated[
         float | None,
-        typer.Option("--weight", "-w", min=0, max=1, help="Visual weight, 0 = speech only, 1 = vision only."),
+        typer.Option("--weight", "-w", help="Visual weight, 0 = speech only, 1 = vision only."),
     ] = None,
     asset: Annotated[str | None, typer.Option("--asset", help="Restrict to one asset id.")] = None,
     person: Annotated[

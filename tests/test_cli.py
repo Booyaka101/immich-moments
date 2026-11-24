@@ -186,7 +186,6 @@ def stub_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         ["index", "--limit", "0", "--reindex"],
         ["search", "cake", "--limit", "-1"],
-        ["search", "cake", "--weight", "2"],
     ],
 )
 def test_invalid_cli_ranges_are_rejected_before_connecting(args, monkeypatch) -> None:
@@ -204,6 +203,12 @@ def test_nonfinite_cli_overrides_are_rejected_before_connecting(command, flag, m
     code, _ = run(command, flag, "nan", monkeypatch=monkeypatch)
     assert code == ConfigError.exit_code
     assert "must be finite" in capsys.readouterr().err
+
+
+def test_out_of_range_search_weight_uses_config_validation(monkeypatch, capsys) -> None:
+    code, _ = run("search", "cake", "--weight", "2", monkeypatch=monkeypatch)
+    assert code == ConfigError.exit_code
+    assert "visual_weight must be between 0 and 1" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

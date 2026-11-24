@@ -93,6 +93,35 @@ def test_a_failed_ping_is_an_error_not_a_false_success(config: Config, status: i
         ml.ping()
 
 
+@pytest.mark.parametrize("raw", ["[broken", [None], [], [[1.0]], [1e100], "[NaN]", 1])
+def test_invalid_clip_embeddings_raise_ml_error(config: Config, raw) -> None:
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"clip": raw}))
+    with MLClient(config, "clip", "faces", transport=transport) as ml, pytest.raises(MLError, match="clip"):
+        ml.embed_text("test")
+
+
+def test_large_finite_clip_embeddings_are_normalised(config: Config) -> None:
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"clip": [3e38, 3e38]}))
+    with MLClient(config, "clip", "faces", transport=transport) as ml:
+        np.testing.assert_allclose(ml.embed_text("test"), [2**-0.5] * 2)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "{bad json",
+        {},
+        [None],
+        [{"boundingBox": {}, "score": 0.5, "embedding": [1]}],
+        [{"boundingBox": {"x1": 1, "y1": 2, "x2": 3, "y2": 4}, "score": 0.5, "embedding": "[]"}],
+    ],
+)
+def test_invalid_face_responses_raise_ml_error(config: Config, raw) -> None:
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json={"facial-recognition": raw}))
+    with MLClient(config, "clip", "faces", transport=transport) as ml, pytest.raises(MLError):
+        ml.detect_faces(FRAME)
+
+
 def test_image_embedding_is_decoded_twice_and_normalised(config: Config) -> None:
     """The container serialises the vector with orjson before FastAPI serialises the response."""
     assert isinstance(RECORDED["clip_visual"]["clip"], str), "fixture must keep the double encoding"

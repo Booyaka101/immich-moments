@@ -545,14 +545,17 @@ def test_prune_refuses_a_partial_walk(config: Config, store: Store) -> None:
     assert store.counts()["assets"] == 0
 
 
-@pytest.mark.parametrize("bad_page", [{}, {"assets": {}}, {"assets": {"items": [{"id": ""}]}}])
+@pytest.mark.parametrize(
+    "bad_page",
+    [{}, {"assets": {}}, {"assets": {"items": [{"id": ""}]}}, {"assets": {"items": [], "nextPage": 2}}],
+)
 def test_prune_keeps_the_index_if_a_later_catalogue_page_is_invalid(config, store, bad_page) -> None:
     store.upsert_asset("stale", original_file_name="stale.mp4", file_created_at=None, updated_at=None)
     store.set_state("last_discovery", "before")
     pages = iter([{"assets": {"items": [{"id": "keep"}], "nextPage": 2}}, bad_page])
     transport = httpx.MockTransport(lambda _: httpx.Response(200, json=next(pages)))
     with ImmichClient(config, transport=transport) as immich:
-        with pytest.raises(ImmichError, match="invalid asset page"):
+        with pytest.raises(ImmichError, match=r"invalid asset page|invalid nextPage"):
             Indexer(config, store, immich, ml=None).discover(None, prune=True)
     assert store.asset("stale") is not None
     assert store.get_state("last_discovery") == "before"
