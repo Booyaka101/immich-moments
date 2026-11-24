@@ -194,8 +194,13 @@ class ImmichClient:
                 continue
             if not isinstance(body, dict):
                 raise ImmichError("POST /api/search/metadata did not return an object")
-            bucket = body.get("assets") or {}
-            items = bucket.get("items") or []
+            bucket = body.get("assets")
+            items = bucket.get("items") if isinstance(bucket, dict) else None
+            if not isinstance(items, list) or any(
+                not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"].strip()
+                for item in items
+            ):
+                raise ImmichError("POST /api/search/metadata returned an invalid asset page")
             yield from items
             if not items:
                 return

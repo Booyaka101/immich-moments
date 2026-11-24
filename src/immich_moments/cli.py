@@ -7,6 +7,7 @@ import errno
 import json
 import logging
 import os
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -29,7 +30,7 @@ from .config import Config, load_config
 from .errors import ConfigError, MomentsError, StorageError
 from .faces import pad_thumbnail
 from .immich import ImmichClient
-from .indexer import run_index
+from .indexer import Indexer, run_index
 from .labels import build_label_index
 from .media import ffmpeg_path, ffprobe_path, has_zscale
 from .ml import MLClient
@@ -77,14 +78,15 @@ def _root(
         raise typer.Exit
 
 
-def _setup(config_path: Path | None, verbose: bool, **overrides) -> Config:
+def _setup(config_path: Path | None, verbose: bool, *, ensure_dirs: bool = True, **overrides) -> Config:
     logging.basicConfig(
         level=logging.INFO if verbose else logging.WARNING,
         format="%(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
     config = load_config(config_path, overrides)
-    config.ensure_dirs()
+    if ensure_dirs:
+        config.ensure_dirs()
     return config
 
 
@@ -248,9 +250,7 @@ def index(
     write_back: Annotated[
         bool, typer.Option("--write-back", help="Write tags and descriptions back into Immich.")
     ] = False,
-    dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="With --write-back, print the mutations and send none.")
-    ] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview pruning or Immich write-back.")] = False,
     fail_on_error: Annotated[
         bool,
         typer.Option(
@@ -261,12 +261,19 @@ def index(
     verbose: VerboseOption = False,
 ) -> None:
     """Index every video: scenes, CLIP vectors, faces and speech, checkpointed per asset."""
-    config = _setup(config_path, verbose)
     phases = _phases(phase)
     if prune and (limit is not None or since.strip().lower() not in ("auto", "all")):
         raise ConfigError(
             "--prune has to walk the whole library, so it cannot take --limit or a --since date."
         )
+
+    preview = prune and dry_run
+    if preview and (reindex or write_back):
+        raise ConfigError("A prune preview cannot be combined with --reindex or --write-back.")
+    config = _setup(config_path, verbose, ensure_dirs=not preview)
+    if preview:
+        _preview_prune(config)
+        return
 
     immich, ml, clip_model, face_model = _clients(config)
     with immich, ml, Store(config) as store:
@@ -296,6 +303,21 @@ def index(
             _print_writeback(apply_write_back(store, immich, store.indexed_asset_ids(), dry_run=dry_run))
         if fail_on_error and (report.failed or report.unavailable):
             raise typer.Exit(1)
+
+
+def _preview_prune(config: Config) -> None:
+    if not config.db_path.is_file():
+        console.print("No local index to prune.")
+        return
+    try:
+        with Store(config, read_only=True) as store, ImmichClient(config) as immich:
+            found, gone = Indexer(config, store, immich, ml=None).discover(None, preview=True)
+    except sqlite3.Error as exc:
+        raise StorageError(f"Could not read the local index at {config.db_path}: {exc}") from exc
+    console.print(f"Prune preview: {found} video(s) listed by Immich; {len(gone)} would be removed.")
+    for name in gone:
+        console.print(f"  {name}", markup=False, highlight=False)
+    console.print("No index changes made.")
 
 
 @app.command()

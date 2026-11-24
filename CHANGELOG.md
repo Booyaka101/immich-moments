@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `index --prune --dry-run` previews removals without changing the index or contacting ML.
+- The README explains what happens to transcripts and search results after a video is removed from Immich.
+
+### Fixed
+
+- Invalid asset pages now stop catalogue discovery rather than being mistaken for an empty page during pruning.
+
 ## 1.3.1 - 2026-10-26
 
 ### Added
