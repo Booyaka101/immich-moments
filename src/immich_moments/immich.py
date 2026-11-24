@@ -181,6 +181,7 @@ class ImmichClient:
         """
         structured = False
         page, cursor = 1, None
+        seen_cursors: set[str] = set()
         while True:
             try:
                 body = self.post_json(
@@ -188,25 +189,41 @@ class ImmichClient:
                     _search_body(structured, page, cursor, updated_after, album_id),
                 )
             except ImmichError as exc:
-                if structured or exc.status != 400:
+                if structured or page != 1 or exc.status != 400:
                     raise
                 structured = True
                 continue
             if not isinstance(body, dict):
                 raise ImmichError("POST /api/search/metadata did not return an object")
-            bucket = body.get("assets") or {}
-            items = bucket.get("items") or []
-            yield from items
-            if not items:
-                return
+            bucket = body.get("assets")
+            items = bucket.get("items") if isinstance(bucket, dict) else None
+            if not isinstance(items, list) or any(
+                not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"].strip()
+                for item in items
+            ):
+                raise ImmichError("POST /api/search/metadata returned an invalid asset page")
             if structured:
                 cursor = bucket.get("nextCursor")
-                if not cursor:
-                    return
+                if cursor is not None:
+                    if not isinstance(cursor, str) or not cursor.strip() or cursor in seen_cursors:
+                        raise ImmichError(
+                            "POST /api/search/metadata returned an invalid or repeated nextCursor"
+                        )
+                    seen_cursors.add(cursor)
+                continuation = cursor
             else:
-                if not bucket.get("nextPage"):
-                    return
+                next_page = bucket.get("nextPage")
+                if next_page is not None and (
+                    isinstance(next_page, bool)
+                    or not isinstance(next_page, (int, str))
+                    or str(next_page) != str(page + 1)
+                ):
+                    raise ImmichError("POST /api/search/metadata returned an invalid nextPage")
+                continuation = next_page
                 page += 1
+            yield from items
+            if continuation is None:
+                return
 
     def get_asset(self, asset_id: str) -> dict[str, Any]:
         """The asset record. Gone from Immich is `AssetUnavailable`, the same as for its original."""

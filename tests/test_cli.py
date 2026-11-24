@@ -186,7 +186,6 @@ def stub_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         ["index", "--limit", "0", "--reindex"],
         ["search", "cake", "--limit", "-1"],
-        ["search", "cake", "--weight", "2"],
     ],
 )
 def test_invalid_cli_ranges_are_rejected_before_connecting(args, monkeypatch) -> None:
@@ -204,6 +203,12 @@ def test_nonfinite_cli_overrides_are_rejected_before_connecting(command, flag, m
     code, _ = run(command, flag, "nan", monkeypatch=monkeypatch)
     assert code == ConfigError.exit_code
     assert "must be finite" in capsys.readouterr().err
+
+
+def test_out_of_range_search_weight_uses_config_validation(monkeypatch, capsys) -> None:
+    code, _ = run("search", "cake", "--weight", "2", monkeypatch=monkeypatch)
+    assert code == ConfigError.exit_code
+    assert "visual_weight must be between 0 and 1" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -465,6 +470,55 @@ def test_prune_with_a_partial_walk_is_refused_before_anything_connects(
     captured = capsys.readouterr()
     assert code == ConfigError.exit_code
     assert "whole library" in captured.err
+
+
+@pytest.mark.parametrize("flag", ["--reindex", "--write-back"])
+def test_prune_preview_rejects_mutating_flags(flag, monkeypatch, capsys) -> None:
+    code, _ = run("index", "--prune", "--dry-run", flag, monkeypatch=monkeypatch)
+    assert code == ConfigError.exit_code
+    assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_prune_preview_without_an_index_does_not_create_one(tmp_path) -> None:
+    result = runner.invoke(app, ["index", "--prune", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "No local index to prune." in result.output
+    assert not (tmp_path / "data").exists()
+
+
+def test_prune_preview_lists_missing_videos_without_changing_the_index(config, monkeypatch) -> None:
+    config.ensure_dirs()
+    monkeypatch.setenv("DATA_DIR", str(config.data_dir))
+    with Store(config) as store:
+        store.upsert_asset("gone", original_file_name="[old].mp4", file_created_at=None, updated_at=None)
+        store.upsert_asset("keep", original_file_name="keep.mp4", file_created_at=None, updated_at=None)
+        store.set_state("last_discovery", "before")
+    audio = config.audio_dir / "gone.flac"
+    audio.write_bytes(b"sidecar")
+
+    class Catalogue:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def iter_videos(self, *, updated_after):
+            assert updated_after is None
+            yield {"id": "keep", "originalFileName": "new-name.mp4"}
+            yield {"id": "new"}
+
+    monkeypatch.setattr(cli_module, "ImmichClient", lambda _config: Catalogue())
+    result = runner.invoke(app, ["index", "--prune", "--dry-run"])
+    assert result.exit_code == 0, result.exception
+    assert "2 video(s) listed by Immich; 1 would be removed" in result.output
+    assert "[old].mp4" in result.output
+    with Store(config, read_only=True) as store:
+        assert store.asset("gone") is not None
+        assert store.asset("keep")["original_file_name"] == "keep.mp4"
+        assert store.asset("new") is None
+        assert store.get_state("last_discovery") == "before"
+    assert audio.read_bytes() == b"sidecar"
 
 
 def test_an_album_is_filtered_by_the_spelling_the_index_uses(

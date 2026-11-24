@@ -192,9 +192,18 @@ at 1.35s a frame instead of 0.045s on the same CPU container. Changing it means 
 here and a re-run of Immich's own Smart Search job, since neither set of vectors is comparable
 with the last model's.
 
-Videos you trash in Immich do not leave the index on their own, because `--since auto` never
-hears about them. `--prune` walks the whole library instead and drops whatever Immich no
-longer has, scenes and transcript included:
+#### If I delete a video in Immich, does it disappear from Moments search?
+
+Not automatically. A normal incremental index run leaves it in place. Once Immich no longer
+lists the video for your API key, run `immich-moments index --prune` to remove its scenes and
+transcript from the local Moments index. It will no longer appear in Moments search.
+
+To see what would be removed first, run `immich-moments index --prune --dry-run`. This walks
+the full Immich video catalogue and lists the affected filenames without updating your index,
+downloading videos, or connecting to ML. Use the same Immich account you indexed with:
+pruning also treats videos that account can no longer see as missing.
+
+To apply the removals and continue with normal indexing:
 
 ```
 $ immich-moments index --prune

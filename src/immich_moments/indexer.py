@@ -84,14 +84,14 @@ class Indexer:
     # ---- phases ----------------------------------------------------------
 
     def discover(
-        self, since: str | None, limit: int | None = None, *, prune: bool = False
+        self, since: str | None, limit: int | None = None, *, prune: bool = False, preview: bool = False
     ) -> tuple[int, list[str]]:
         """Record every video asset Immich knows about. Cheap, and safe to repeat.
 
         With `prune`, anything the index holds that Immich did not list is dropped, which only
         means something when the whole library was walked. Returns (found, file names dropped).
         """
-        if prune and (since or limit is not None):
+        if (prune or preview) and (since or limit is not None):
             raise ConfigError("--prune has to walk the whole library, so it cannot take --since or --limit.")
         started_at = _now()
         seen: list[str] = []
@@ -101,6 +101,8 @@ class Indexer:
             if not asset_id:
                 continue
             seen.append(asset_id)
+            if preview:
+                continue
             self.store.upsert_asset(
                 asset_id,
                 original_file_name=asset.get("originalFileName") or asset_id,
@@ -111,6 +113,8 @@ class Indexer:
             if limit is not None and len(seen) >= limit:
                 truncated = True
                 break
+        if preview:
+            return len(seen), [row["original_file_name"] for row in self.store.missing_assets(seen)]
         # Checkpointing a truncated enumeration would hide every video --limit never reached from
         # the next `--since auto` run, permanently.
         if not truncated:

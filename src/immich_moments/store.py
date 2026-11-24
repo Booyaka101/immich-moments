@@ -208,9 +208,13 @@ class VectorFile:
 
 
 class Store:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, *, read_only: bool = False) -> None:
         self.config = config
         self.path = config.db_path
+        if read_only:
+            self.db = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True)
+            self.db.row_factory = sqlite3.Row
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # The web app runs searches in a worker thread, so the connection outlives its
         # creating thread. sqlite3.threadsafety is 3 on every build we support, and the app
@@ -372,14 +376,18 @@ class Store:
             "ORDER BY file_created_at DESC, id"
         ).fetchall()
 
-    def prune_assets(self, keep: Collection[str]) -> list[sqlite3.Row]:
-        """Drop every asset not in `keep`, with its scenes, faces and transcript. Returns what went."""
+    def missing_assets(self, keep: Collection[str]) -> list[sqlite3.Row]:
         rows = self.db.execute("SELECT id, original_file_name FROM assets ORDER BY file_created_at")
         wanted = set(keep)
-        gone = [row for row in rows.fetchall() if row["id"] not in wanted]
+        return [row for row in rows if row["id"] not in wanted]
+
+    def prune_assets(self, keep: Collection[str]) -> list[sqlite3.Row]:
+        """Drop every asset not in `keep`, with its scenes, faces and transcript. Returns what went."""
+        gone = self.missing_assets(keep)
         if gone:
             with self.transaction() as db:
                 db.executemany("DELETE FROM assets WHERE id = ?", [(row["id"],) for row in gone])
+                db.execute("DELETE FROM run_state WHERE key = 'visual_reference'")
         return gone
 
     def problem_assets(self) -> list[sqlite3.Row]:

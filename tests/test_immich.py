@@ -72,6 +72,39 @@ def test_model_names_without_admin_rights(config: Config) -> None:
             immich.model_names()
 
 
+def test_iter_videos_follows_continuation_on_an_empty_page(config: Config) -> None:
+    pages = iter(
+        [
+            {"assets": {"items": [], "nextPage": "2"}},
+            {"assets": {"items": [{"id": "keep"}], "nextPage": None}},
+        ]
+    )
+    with client(config, lambda _: json_response(next(pages))) as immich:
+        assert list(immich.iter_videos()) == [{"id": "keep"}]
+
+
+def test_iter_videos_does_not_switch_formats_after_the_first_page(config: Config) -> None:
+    pages = iter(
+        [
+            json_response({"assets": {"items": [{"id": "keep"}], "nextPage": 2}}),
+            json_response({"message": "bad request"}, 400),
+        ]
+    )
+    with client(config, lambda _: next(pages)) as immich, pytest.raises(ImmichError) as error:
+        list(immich.iter_videos())
+    assert error.value.status == 400
+
+
+def test_iter_videos_rejects_a_repeated_cursor(config: Config) -> None:
+    page = {"assets": {"items": [{"id": "keep"}], "nextCursor": "repeat"}}
+    pages = iter([json_response({"message": "bad request"}, 400), json_response(page), json_response(page)])
+    with (
+        client(config, lambda _: next(pages)) as immich,
+        pytest.raises(ImmichError, match="repeated nextCursor"),
+    ):
+        list(immich.iter_videos())
+
+
 def test_iter_videos_pages_the_flat_shape(config: Config) -> None:
     seen: list[dict] = []
 
