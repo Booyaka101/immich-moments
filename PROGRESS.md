@@ -1,6 +1,6 @@
 # PROGRESS
 
-Status: v1.3.1 release prepared. PRs #20 and #21 merged after CI passed. Publication pending.
+Status: v1.3.1 published. The 1.3.2 release includes the prune preview and hardening from PR #23.
 
 ## What exists
 
